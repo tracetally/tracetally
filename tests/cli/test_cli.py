@@ -10,7 +10,9 @@ from typer.testing import CliRunner
 from tests.support.synthetic import write_examples
 from tracetally.cli import EXIT_INPUT, EXIT_UNPRICED, app
 
-runner = CliRunner()
+# Rich colors option dashes separately when a TTY or FORCE_COLOR is present,
+# which splits "--format" across ANSI sequences. Pin the runner to plain text.
+runner = CliRunner(env={"NO_COLOR": "1", "FORCE_COLOR": None})
 
 
 def test_summary_on_jsonl_and_otel(tmp_path: Path) -> None:
