@@ -1,0 +1,222 @@
+# Starter list prices for tracetally 0.1 (W1).
+# Standard short-context text rates. Every price has source_url and retrieved_on.
+# Long-context tiers are included only where the publisher states a token threshold.
+# Priority, flex, regional, and audio-only rates are not applied.
+# Retrieved 2026-10-15. This file is not updated at runtime.
+schema_version: 1
+table_id: "2026-10"
+currency: USD
+unit: per_1m_tokens
+retrieved_on: "2026-10-15"
+notes: >
+  Starter table for OpenAI, Anthropic, and Gemini Developer API list prices.
+  Gemini 3 promotional prices that change on a later date are omitted.
+  Azure OpenAI and Vertex AI are not priced from these lists.
+
+providers:
+  openai:
+    batch_discount:
+      value: "0.5"
+      source_url: "https://developers.openai.com/api/docs/pricing"
+      retrieved_on: "2026-10-15"
+    models:
+      gpt-4o:
+        input: "2.50"
+        cached_input: "1.25"
+        output: "10.00"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gpt-4o-2024-05-13:
+        input: "5.00"
+        output: "15.00"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gpt-4o-mini:
+        aliases: ["gpt-4o-mini-2024-07-18"]
+        input: "0.15"
+        cached_input: "0.075"
+        output: "0.60"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gpt-4.1:
+        input: "2.00"
+        cached_input: "0.50"
+        output: "8.00"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gpt-4.1-mini:
+        input: "0.40"
+        cached_input: "0.10"
+        output: "1.60"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gpt-4.1-nano:
+        input: "0.10"
+        cached_input: "0.025"
+        output: "0.40"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gpt-5:
+        input: "1.25"
+        cached_input: "0.125"
+        output: "10.00"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gpt-5-mini:
+        input: "0.25"
+        cached_input: "0.025"
+        output: "2.00"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gpt-5-nano:
+        input: "0.05"
+        cached_input: "0.005"
+        output: "0.40"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      o3:
+        input: "2.00"
+        cached_input: "0.50"
+        output: "8.00"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      o4-mini:
+        input: "1.10"
+        cached_input: "0.275"
+        output: "4.40"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      o3-mini:
+        input: "1.10"
+        cached_input: "0.55"
+        output: "4.40"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gpt-4-turbo-2024-04-09:
+        input: "10.00"
+        output: "30.00"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gpt-3.5-turbo:
+        aliases: ["gpt-3.5-turbo-0125"]
+        input: "0.50"
+        output: "1.50"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gpt-3.5-turbo-1106:
+        input: "1.00"
+        output: "2.00"
+        source_url: "https://developers.openai.com/api/docs/pricing"
+        retrieved_on: "2026-10-15"
+
+  anthropic:
+    batch_discount:
+      value: "0.5"
+      source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+      retrieved_on: "2026-10-15"
+    models:
+      claude-opus-5-5:
+        input: "4"
+        cached_input: "0.20"
+        output: "20"
+        source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+        retrieved_on: "2026-10-15"
+      claude-opus-5:
+        input: "5"
+        cached_input: "0.50"
+        output: "25"
+        source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+        retrieved_on: "2026-10-15"
+      claude-opus-4-6:
+        input: "5"
+        cached_input: "0.50"
+        output: "25"
+        source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+        retrieved_on: "2026-10-15"
+      claude-opus-4-5:
+        input: "5"
+        cached_input: "0.50"
+        output: "25"
+        source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+        retrieved_on: "2026-10-15"
+      claude-sonnet-5-5:
+        input: "2"
+        cached_input: "0.10"
+        output: "10"
+        source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+        retrieved_on: "2026-10-15"
+      claude-sonnet-5:
+        input: "2"
+        cached_input: "0.20"
+        output: "10"
+        source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+        retrieved_on: "2026-10-15"
+      claude-sonnet-4-6:
+        input: "3"
+        cached_input: "0.30"
+        output: "15"
+        source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+        retrieved_on: "2026-10-15"
+      claude-sonnet-4-5:
+        input: "3"
+        cached_input: "0.30"
+        output: "15"
+        source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+        retrieved_on: "2026-10-15"
+      claude-haiku-4-5:
+        input: "1"
+        cached_input: "0.10"
+        output: "5"
+        source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+        retrieved_on: "2026-10-15"
+      claude-haiku-5-5:
+        input: "0.10"
+        cached_input: "0.01"
+        output: "0.50"
+        long_context_above_tokens: 100000
+        long_input: "0.50"
+        long_cached_input: "0.05"
+        long_output: "2.50"
+        caveat: "Published rate switches above 100000 input tokens; that tier is applied from input_tokens."
+        source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+        retrieved_on: "2026-10-15"
+      claude-3-5-haiku-20241022:
+        aliases: ["claude-3-5-haiku-latest"]
+        input: "0.80"
+        cached_input: "0.08"
+        output: "4"
+        caveat: "Haiku 3.5 list price. The pricing page marks this model retired except on Google Cloud."
+        source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+        retrieved_on: "2026-10-15"
+
+  gemini:
+    batch_discount:
+      value: "0.5"
+      source_url: "https://ai.google.dev/gemini-api/docs/pricing"
+      retrieved_on: "2026-10-15"
+    models:
+      gemini-2.5-pro:
+        input: "1.25"
+        cached_input: "0.125"
+        output: "10.00"
+        long_context_above_tokens: 200000
+        long_input: "2.50"
+        long_cached_input: "0.25"
+        long_output: "15.00"
+        caveat: "Developer API standard rate. Long-context rate applies above 200000 input tokens. Priority and regional rates are not applied."
+        source_url: "https://ai.google.dev/gemini-api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gemini-2.5-flash:
+        input: "0.30"
+        cached_input: "0.03"
+        output: "2.50"
+        caveat: "Text, image, and video input rate. Audio input is priced separately by Google and is not applied."
+        source_url: "https://ai.google.dev/gemini-api/docs/pricing"
+        retrieved_on: "2026-10-15"
+      gemini-2.5-flash-lite:
+        input: "0.10"
+        cached_input: "0.01"
+        output: "0.40"
+        caveat: "Text, image, and video input rate. Audio input is priced separately by Google and is not applied."
+        source_url: "https://ai.google.dev/gemini-api/docs/pricing"
+        retrieved_on: "2026-10-15"

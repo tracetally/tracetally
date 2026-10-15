@@ -1,0 +1,147 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tracetally"
+version = "0.1.0.dev0"
+description = "Offline cost and reliability audit for exported LLM traces."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Arockia" }]
+keywords = ["llm", "opentelemetry", "cost", "observability", "cli"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: System :: Monitoring",
+]
+dependencies = [
+  "typer>=0.12,<1",
+  "pydantic>=2.6,<3",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+fast = ["orjson>=3.10"]
+dev = [
+  "pytest>=8",
+  "pytest-socket>=0.7",
+  "pytest-cov>=5",
+  "hypothesis>=6",
+  "numpy>=1.26",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "build>=1.2",
+]
+
+[project.scripts]
+tracetally = "tracetally.cli:app"
+
+[project.entry-points."tracetally.readers"]
+jsonl = "tracetally.readers.jsonl:JsonlReader"
+otel = "tracetally.readers.otel:OtelReader"
+
+[project.urls]
+Homepage = "https://github.com/tracetally/tracetally"
+Repository = "https://github.com/tracetally/tracetally"
+Changelog = "https://github.com/tracetally/tracetally/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tracetally"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/tracetally/pricing/data/prices-2026-10.yaml" = "tracetally/pricing/data/prices-2026-10.yaml"
+"src/tracetally/py.typed" = "tracetally/py.typed"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src",
+  "tests",
+  "examples",
+  "scripts",
+  "README.md",
+  "LICENSE",
+  "NOTICE",
+  "CONTRIBUTING.md",
+  "CHANGELOG.md",
+  "SECURITY.md",
+  "pyproject.toml",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"socket".msg = "tracetally is offline-only and must not import socket"
+"http.client".msg = "tracetally is offline-only and must not import http.client"
+"urllib.request".msg = "tracetally is offline-only and must not import urllib.request"
+"urllib3".msg = "tracetally is offline-only and must not import urllib3"
+"requests".msg = "tracetally is offline-only and must not import requests"
+"httpx".msg = "tracetally is offline-only and must not import httpx"
+"aiohttp".msg = "tracetally is offline-only and must not import aiohttp"
+"subprocess".msg = "tracetally must not spawn processes"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["TID251"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["tracetally"]
+mypy_path = "src"
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+strict_optional = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = "tracetally.core.*"
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["yaml", "orjson"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "--disable-socket --strict-markers"
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = [
+  "tracetally.core",
+  "tracetally.readers",
+  "tracetally.pricing",
+  "tracetally.analysis",
+]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+]
