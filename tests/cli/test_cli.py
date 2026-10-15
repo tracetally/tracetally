@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -10,9 +11,15 @@ from typer.testing import CliRunner
 from tests.support.synthetic import write_examples
 from tracetally.cli import EXIT_INPUT, EXIT_UNPRICED, app
 
-# Rich colors option dashes separately when a TTY or FORCE_COLOR is present,
-# which splits "--format" across ANSI sequences. Pin the runner to plain text.
-runner = CliRunner(env={"NO_COLOR": "1", "FORCE_COLOR": None})
+# GitHub Actions sets GITHUB_ACTIONS, and Typer then forces a color terminal.
+# Rich's option highlighter styles each dash on its own, so "--format" is not
+# a contiguous substring until the ANSI codes are removed.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+runner = CliRunner()
+
+
+def _plain(text: str) -> str:
+    return _ANSI.sub("", text)
 
 
 def test_summary_on_jsonl_and_otel(tmp_path: Path) -> None:
@@ -128,5 +135,6 @@ providers:
 def test_summary_help_lists_the_milestone_flags() -> None:
     result = runner.invoke(app, ["summary", "--help"])
     assert result.exit_code == 0
+    help_text = _plain(result.output)
     for flag in ("--format", "--endpoint-attr", "--prices", "--json", "--strict"):
-        assert flag in result.output
+        assert flag in help_text
