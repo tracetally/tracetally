@@ -27,8 +27,9 @@ app = typer.Typer(
     add_completion=False,
 )
 prices_app = typer.Typer(
-    help="Inspect the bundled price table or a --prices override.",
-    no_args_is_help=True,
+    help="List the bundled price table, or check it. A --prices file is merged over the bundle.",
+    no_args_is_help=False,
+    invoke_without_command=True,
     add_completion=False,
 )
 app.add_typer(prices_app, name="prices")
@@ -41,10 +42,16 @@ EXIT_UNPRICED = 4
 
 @app.command("summary")
 def summary_command(
-    files: Annotated[list[Path], typer.Argument(help="Trace files. JSONL or OTLP JSON.")],
+    files: Annotated[
+        list[Path],
+        typer.Argument(help="Trace files. JSONL, OTLP JSON, Langfuse export, or OpenAI usage CSV."),
+    ],
     format_name: Annotated[
         str | None,
-        typer.Option("--format", help="Force jsonl or otel. Default: sniff each file."),
+        typer.Option(
+            "--format",
+            help="Force jsonl, otel, langfuse, or openai_csv. Default: sniff each file.",
+        ),
     ] = None,
     endpoint_attr: Annotated[
         str | None,
@@ -110,6 +117,13 @@ def version_command() -> None:
     typer.echo(__version__)
 
 
+@prices_app.callback()
+def prices_command(ctx: typer.Context) -> None:
+    """List models in the loaded price table."""
+    if ctx.invoked_subcommand is None:
+        prices_list(prices=None, json_output=False)
+
+
 @prices_app.command("list")
 def prices_list(
     prices: Annotated[
@@ -142,9 +156,11 @@ def prices_list(
     )
     for row in rows:
         cached = row["cached_input"] if row["cached_input"] is not None else "-"
+        reasoning = row["reasoning"] if row["reasoning"] is not None else "-"
         typer.echo(
             f"{row['provider']}/{row['model']}  in {row['input']}  cached {cached}  "
-            f"out {row['output']}  {row['retrieved_on']}  {row['source_url']}"
+            f"reasoning {reasoning}  out {row['output']}  "
+            f"{row['retrieved_on']}  {row['source_url']}"
         )
 
 
@@ -189,6 +205,7 @@ def _price_row(table: PriceTable, price: ModelPrice) -> dict[str, object]:
         "model": price.model,
         "input": format(price.input, "f"),
         "cached_input": None if price.cached_input is None else format(price.cached_input, "f"),
+        "reasoning": None if price.reasoning is None else format(price.reasoning, "f"),
         "output": format(price.output, "f"),
         "source_url": price.source_url,
         "retrieved_on": price.retrieved_on.isoformat(),

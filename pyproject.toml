@@ -50,6 +50,8 @@ tracetally = "tracetally.cli:app"
 [project.entry-points."tracetally.readers"]
 jsonl = "tracetally.readers.jsonl:JsonlReader"
 otel = "tracetally.readers.otel:OtelReader"
+langfuse = "tracetally.readers.langfuse:LangfuseReader"
+openai_csv = "tracetally.readers.openai_csv:OpenAICsvReader"
 
 [project.urls]
 Homepage = "https://github.com/tracetally/tracetally"
