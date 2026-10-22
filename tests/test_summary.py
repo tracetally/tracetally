@@ -100,6 +100,9 @@ def test_summary_cost_latency_and_error_rates(tmp_path: Path) -> None:
         assert payload["totals"]["cost_usd"] == "0.27241"
         assert payload["error_rates"]["n_429"] == 11
         assert payload["error_rates"]["n_5xx"] == 1
+        assert payload["mode"] == "trace"
+        assert payload["skipped_checks"] == []
+        assert payload["error_rates"]["measured"] is True
 
 
 def pytest_approx(value: float) -> object:

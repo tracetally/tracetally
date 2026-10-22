@@ -123,6 +123,13 @@ providers:
     assert readers.exit_code == 0
     assert "jsonl:" in readers.output
     assert "otel:" in readers.output
+    assert "langfuse:" in readers.output
+    assert "openai_csv:" in readers.output
+
+    listed_default = runner.invoke(app, ["prices"])
+    assert listed_default.exit_code == 0
+    assert "gpt-4o-mini" in listed_default.output
+    assert "reasoning" in listed_default.output
 
     version = runner.invoke(app, ["version"])
     assert version.exit_code == 0

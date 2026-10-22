@@ -16,6 +16,7 @@ from rich.table import Table
 from tracetally import __version__
 from tracetally.analysis.checks import CHECKS, Check
 from tracetally.analysis.checks.common import monthly_factor
+from tracetally.analysis.skip import PLANNED_CHECKS, missing_capability_reason
 from tracetally.analysis.summary import METHODOLOGY, Summary, summarize
 from tracetally.config import AnalyzeConfig
 from tracetally.core.errors import UsageError
@@ -167,7 +168,7 @@ def analyze(store: TraceStore, table: PriceTable, cfg: AnalyzeConfig | None = No
     findings: list[Finding] = []
     skipped: list[SkippedCheck] = []
     for check in CHECKS:
-        reason = _skip_reason(check, selected, caps)
+        reason = _skip_reason(check, selected, caps, store.readers)
         if reason is not None:
             skipped.append(SkippedCheck(check=check.id, reason=reason))
             continue
@@ -192,15 +193,23 @@ def _reject_unknown(cfg: AnalyzeConfig) -> None:
         raise UsageError(f"unknown check {unknown[0]!r}; known checks: {', '.join(sorted(known))}")
 
 
-def _skip_reason(check: Check, cfg: AnalyzeConfig, caps: frozenset[Capability]) -> str | None:
+_CHECK_DETAIL = {spec.check: spec.detail for spec in PLANNED_CHECKS}
+
+
+def _skip_reason(
+    check: Check,
+    cfg: AnalyzeConfig,
+    caps: frozenset[Capability],
+    readers: set[str],
+) -> str | None:
     if cfg.only is not None and check.id not in cfg.only:
         return "not selected by --only"
     if check.id in cfg.skip:
         return "skipped with --skip"
     missing = check.requires - caps
     if missing:
-        names = ", ".join(sorted(cap.value for cap in missing))
-        return f"reader is missing capabilities: {names}"
+        detail = _CHECK_DETAIL.get(check.id, "the check needs those fields")
+        return missing_capability_reason(missing, readers, detail)
     if check.id == "model_swap" and not cfg.tier_map:
         return (
             "pass --tier-map to reprice endpoints; model swap is a what-if and is skipped "

@@ -66,6 +66,7 @@ class ModelPrice:
     cached_input: Decimal | None
     source_url: str
     retrieved_on: date
+    reasoning: Decimal | None = None
     aliases: tuple[str, ...] = ()
     long_context_above_tokens: int | None = None
     long_input: Decimal | None = None
@@ -86,6 +87,7 @@ class ModelPrice:
             cached_input=self.cached_input,
             source_url=self.source_url,
             retrieved_on=self.retrieved_on,
+            reasoning=self.reasoning,
             aliases=self.aliases,
             long_context_above_tokens=self.long_context_above_tokens,
             long_input=self.long_input,
@@ -450,17 +452,8 @@ def _parse_model(
     loc = f"{where}: model {model!r}"
     input_price = _price_field(spec, "input", loc)
     output_price = _price_field(spec, "output", loc)
-    cached = spec.get("cached_input")
-    cached_price: Decimal | None
-    if cached is None:
-        cached_price = None
-    else:
-        try:
-            cached_price = decimal_price(cached)
-        except ValueError as exc:
-            raise PriceError(f"{loc}: cached_input: {exc}") from exc
-        if cached_price < 0:
-            raise PriceError(f"{loc}: cached_input must be >= 0")
+    cached_price = _optional_price(spec, "cached_input", loc)
+    reasoning_price = _optional_price(spec, "reasoning", loc)
     source = _require_str(spec, "source_url", loc)
     _check_url(source, loc)
     retrieved = _require_date(spec, "retrieved_on", loc)
@@ -485,6 +478,7 @@ def _parse_model(
         input=input_price,
         output=output_price,
         cached_input=cached_price,
+        reasoning=reasoning_price,
         source_url=source,
         retrieved_on=retrieved,
         aliases=aliases,
@@ -497,6 +491,19 @@ def _parse_model(
         batch_cached=effective_cached,
         batch_cached_explicit=explicit,
     )
+
+
+def _optional_price(spec: dict[str, object], key: str, loc: str) -> Decimal | None:
+    raw = spec.get(key)
+    if raw is None:
+        return None
+    try:
+        value = decimal_price(raw)
+    except ValueError as exc:
+        raise PriceError(f"{loc}: {key}: {exc}") from exc
+    if value < 0:
+        raise PriceError(f"{loc}: {key} must be >= 0")
+    return value
 
 
 def _price_field(spec: dict[str, object], key: str, loc: str) -> Decimal:
@@ -602,6 +609,7 @@ def _rebind_batch(bucket: ProviderPrices) -> None:
             cached_input=price.cached_input,
             source_url=price.source_url,
             retrieved_on=price.retrieved_on,
+            reasoning=price.reasoning,
             aliases=price.aliases,
             long_context_above_tokens=price.long_context_above_tokens,
             long_input=price.long_input,

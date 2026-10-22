@@ -79,9 +79,16 @@ class BaseReader:
 def _builtin_readers() -> dict[str, type[BaseReader]]:
     # Imported lazily so this module can be imported by the reader modules.
     from tracetally.readers.jsonl import JsonlReader
+    from tracetally.readers.langfuse import LangfuseReader
+    from tracetally.readers.openai_csv import OpenAICsvReader
     from tracetally.readers.otel import OtelReader
 
-    return {JsonlReader.name: JsonlReader, OtelReader.name: OtelReader}
+    return {
+        JsonlReader.name: JsonlReader,
+        OtelReader.name: OtelReader,
+        LangfuseReader.name: LangfuseReader,
+        OpenAICsvReader.name: OpenAICsvReader,
+    }
 
 
 def registry() -> dict[str, type[BaseReader]]:
@@ -180,6 +187,7 @@ def load_paths(paths: list[Path], cfg: ReaderConfig) -> TraceStore:
         reader = reader_cls()
         stat = InputStat(path=str(path), sha256=file_sha256(path))
         store.note_capabilities(frozenset(reader_cls.capabilities))
+        store.note_reader(reader_cls.name)
         try:
             for item in reader.read(path, cfg):
                 if isinstance(item, LLMCall):

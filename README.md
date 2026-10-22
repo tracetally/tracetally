@@ -4,8 +4,10 @@ Offline cost and reliability audit for LLM traces you already exported.
 
 Your LLM bill tells you the total. tracetally tells you why.
 
-This tree is the W3 milestone (`0.1.0.dev0`): it reads traces, prints a
-summary, and ranks savings checks. It does not yet write the audit report.
+This tree is the W3 milestone (`0.1.0.dev0`): it reads JSONL, OTLP/JSON,
+Langfuse, and OpenAI usage CSV exports, prints a summary, and ranks savings
+checks. It does not yet write the audit report. A cost-only file says which
+checks it cannot run, and why.
 
 ## What it is not
 
@@ -33,6 +35,9 @@ customer result.
 ```bash
 tracetally summary examples/synthetic_otel.json
 tracetally summary examples/synthetic.jsonl --json
+tracetally summary examples/synthetic_langfuse.json
+tracetally summary examples/synthetic_openai_usage.csv
+tracetally prices
 ```
 
 `examples/synthetic_otel.json` is an OTLP/JSON document. `examples/synthetic.jsonl`
@@ -41,6 +46,8 @@ is one call per line. Both contain the same 235 calls: the original 31
 4 `gemini-2.5-flash`, 2 unpriced `acme-private-llm`) plus planted endpoints and
 a clean `support.control` endpoint. The OTLP file also has tool spans, which
 are not billed. `examples/ground_truth.json` lists the planted dollar ranges.
+`examples/synthetic_langfuse.json` and `examples/synthetic_openai_usage.csv`
+are small stand-ins for those export shapes. They are not real account exports.
 
 The text summary prints:
 
@@ -58,6 +65,8 @@ It is not printed.
 ```bash
 tracetally analyze examples/synthetic.jsonl --tier-map examples/tiers.example.yaml
 tracetally analyze examples/synthetic_otel.json --tier-map examples/tiers.example.yaml --json
+tracetally analyze examples/synthetic_langfuse.json
+tracetally analyze examples/synthetic_openai_usage.csv --json
 ```
 
 Each check is a pure function and names the reader capabilities it needs.
@@ -91,8 +100,14 @@ The synthetic set plants one issue per dollar check. `support.control` is
 clean: analyze does not flag it. Prompt text is hashed at read. A canary
 string in the synthetic prompts does not appear in analyze output.
 
-Other commands: `tracetally readers`, `tracetally version`, `tracetally prices list`,
-`tracetally prices check`.
+An OpenAI usage CSV has no per-call rows, latency, trace tree, prompts, or
+errors. Summary prints cost-only mode (`n/a` latency, error rates not
+measured). Analyze skips every check that needs those fields and says the CSV
+is cost-only. Langfuse declares the trace capabilities, so those checks run.
+Mixing a CSV with a trace file uses the intersection, which is cost-only.
+
+Other commands: `tracetally readers`, `tracetally version`, `tracetally prices`,
+`tracetally prices list`, `tracetally prices check`.
 
 Exit codes: `0` ok, `2` usage, `3` input or price-file error, `4` records were
 read but none could be priced.
@@ -132,17 +147,67 @@ collector file exporter. Current `gen_ai.*` attributes are read first
 are accepted, as are OpenInference (`llm.*`, `openinference.span.kind`) and
 OpenLLMetry (`traceloop.span.kind`) fallbacks.
 
-`--format jsonl` or `--format otel` skips sniffing. Without `--format`, the
-highest `sniff()` score above 0.5 wins. A tie is an error that names both readers.
+`--format jsonl`, `--format otel`, `--format langfuse`, or `--format openai_csv`
+skips sniffing. Without `--format`, the highest `sniff()` score above 0.5 wins.
+A tie is an error that names both readers. A canonical JSONL line that only has
+`trace_id` stays JSONL; Langfuse detection looks for Langfuse fields
+(`traceId`, `usageDetails`, `type: GENERATION`, `observations`).
 
 A single OTLP document is loaded whole. Above 500 MB the tool warns and still
 loads it; a JSONL exporter streams.
 
+## Langfuse
+
+JSON and CSV exports of traces and observations. The reader accepts a JSON
+array, `{"data": [...]}` / `{"observations": [...]}` / `{"traces": [...]}`,
+one object, or one object per line, and a CSV (comma, semicolon, or tab).
+`GENERATION` and `EMBEDDING` become calls. `SPAN`, `EVENT`, `AGENT`, `TOOL`,
+`CHAIN`, `RETRIEVER`, `EVALUATOR`, and `GUARDRAIL` become spans. Nested
+observations inherit the trace id, name, user, session, and tags.
+
+Token counts come from `usageDetails` / `usage` or from flat columns. A usage
+unit other than tokens is skipped. Cached tokens are treated as included in
+the input count. Reasoning tokens are kept and are not added on top of output
+tokens. `costDetails.total` (or input plus output, or a flat cost column) is
+stored as `reported_cost_usd`, separate from the list-price cost. Latency is
+`endTime - startTime`. A `latency` column is seconds, which is how Langfuse
+documents it.
+
+Column aliases (`Trace ID`, `startTime`, `inputTokens`, …), extra columns, and
+missing optional fields are accepted. Dates may be ISO-8601 (`T` or a space),
+`YYYY/MM/DD`, unix time, or an unambiguous slash date. An ambiguous
+`MM/DD` vs `DD/MM` value is skipped. The default is lenient; `--strict` stops
+on the first bad record.
+
+## OpenAI usage CSV
+
+Aggregated usage or cost rows. There is no published dashboard header, so the
+reader accepts the Usage and Costs API names plus aliases (`date`,
+`snapshot_id`, `n_context_tokens_total`, `n_generated_tokens_total`, `amount`,
+`amount_value`). `request_count` is the row's request total. `input_tokens`
+includes cached tokens. Audio token columns are ignored, not folded into the
+text counts. `amount_cents` is rejected rather than converted. A non-USD
+currency is skipped. A cost with no token counts is kept, with tokens recorded
+as 0 and `reported_cost_usd` preserved.
+
+The reader declares no capabilities. A run that only loads this format is
+cost-only: there is no latency, trace tree, prompt hash, or error status to
+check.
+
 ## Prices
 
-`src/tracetally/pricing/data/prices-2026-10.yaml` is a starter list-price table
-for OpenAI, Anthropic, and Gemini, retrieved 2026-10-15. Every model price and
-every batch discount has `source_url` and `retrieved_on`.
+`src/tracetally/pricing/data/prices-2026-10.yaml` is the bundled list-price
+table for OpenAI, Anthropic, and Gemini, retrieved 2026-10-22 from each
+provider's pricing page. Every model price and every batch discount has
+`source_url` and `retrieved_on`. `tracetally prices` prints the loaded rows,
+including cached-input and reasoning rates. `reasoning`, when set, is the
+published output rate for models that bill thinking tokens as output. It is
+not added again on top of `output_tokens`. Anthropic does not publish a
+separate reasoning rate, so those rows leave it unset. Models whose page
+did not give one verifiable text rate are omitted: OpenAI ids with a "272K"
+split and no integer threshold, Gemini prices that change on a later date,
+and Anthropic names that are not a confirmed API id. `gpt-3.5-turbo-1106` is
+not on the OpenAI page and is not listed.
 
 Resolution is exact id, then alias, then one trailing date suffix
 (`-YYYY-MM-DD`, `-YYYYMMDD`, `@YYYY…`). There is no prefix match, so an unknown
@@ -152,7 +217,8 @@ table and your entries win. A user price still needs `source_url` and
 `retrieved_on`.
 
 Long-context rates apply only where the file publishes a token threshold
-(`gemini-2.5-pro` above 200k input tokens, `claude-haiku-5-5` above 100k).
+(`gemini-2.5-pro` and `gemini-3.1-pro-preview` above 200k input tokens,
+`claude-haiku-5-5` above 100k).
 Audio-specific, priority, flex, and regional uplifts are not applied.
 
 A batch discount is not a flat 50% of the whole cost. It multiplies uncached
@@ -160,20 +226,24 @@ input and output. Cached tokens are multiplied only when that model's
 `batch_cached` rule is `stack`. The bundled table, checked against the
 publisher pages on 2026-10-22:
 
-- OpenAI's batch table publishes a cached-input rate for `gpt-5`, `gpt-5-mini`,
-  and `gpt-5-nano` at half the standard cached rate, so those models stack.
-  Other OpenAI rows in this file show "-" in that column (`gpt-4o`, `gpt-4.1`,
-  the o-series). Their cached tokens stay at the standard cached-input price.
-  https://developers.openai.com/api/docs/pricing
+- OpenAI's batch table publishes a cached-input rate at half the standard
+  cached rate for `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-5.1`, `gpt-5.2`,
+  `gpt-5.4-mini`, and `gpt-5.4-nano`, so those models stack. Other OpenAI rows
+  in this file show "-" in that column (`gpt-4o`, `gpt-4.1`, the o-series,
+  `gpt-5-pro`, `gpt-5.2-pro`). Their cached tokens stay at the standard
+  cached-input price. https://developers.openai.com/api/docs/pricing
 - Anthropic says prompt-caching multipliers stack with the 50% Message Batches
   discount, including cache reads. https://platform.claude.com/docs/en/build-with-claude/batch-processing
-- Gemini 2.5 batch context-caching prices are the standard context-caching
-  prices, and a cache hit in a batch pays the standard context caching rates.
-  https://ai.google.dev/gemini-api/docs/batch-api and
-  https://ai.google.dev/gemini-api/docs/pricing
+- Gemini 2.5, `gemini-3-flash-preview`, and `gemini-3.1-pro-preview` keep the
+  standard context-caching price on a batch cache hit. `gemini-3.1-flash-lite`
+  publishes a batch cache price at half the standard cache price, so that
+  model stacks. `gemini-3.5-flash-lite` publishes a batch cache price of
+  $0.02, which is neither the standard $0.03 nor half of it, so those cached
+  tokens stay at $0.03. https://ai.google.dev/gemini-api/docs/pricing and
+  https://ai.google.dev/gemini-api/docs/batch-api
 
-List prices in the file were retrieved 2026-10-15. The batch-times-cache rule
-was retrieved 2026-10-22. No rate in the file was invented to fill a blank.
+List prices and the batch-times-cache rule were retrieved 2026-10-22. No rate
+in the file was invented to fill a blank.
 
 ## Development
 

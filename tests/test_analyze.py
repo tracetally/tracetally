@@ -34,6 +34,17 @@ from tracetally.pricing.table import load_bundled
 from tracetally.readers.base import load_paths
 
 runner = CliRunner()
+_FIXTURES = Path(__file__).resolve().parent / "fixtures"
+_TRACE_CHECKS = (
+    "token_bloat",
+    "cache_opportunity",
+    "batch_candidates",
+    "retry_waste",
+    "agent_loops",
+    "model_swap",
+    "latency_tail",
+    "error_rates",
+)
 _WHAT_IF = "what-if: price only, validate quality with evals"
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -120,6 +131,88 @@ def test_checks_skip_when_capabilities_or_tier_map_are_missing() -> None:
     }
     with pytest.raises(UsageError, match="unknown check"):
         analyze(store, load_bundled(), AnalyzeConfig(skip=frozenset({"not-a-check"})))
+
+
+_EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+_CANARIES = (
+    "CANARY_PROMPT_DO_NOT_LEAK",
+    "CANARY_OUTPUT_DO_NOT_LEAK",
+    "CANARY_TOOL",
+    "CANARY_META",
+)
+_MISSING_CAPABILITY = {
+    "token_bloat": "per_call",
+    "cache_opportunity": "prompt_hashes",
+    "batch_candidates": "per_call",
+    "retry_waste": "errors",
+    "agent_loops": "trace_tree",
+    "model_swap": "per_call",
+    "latency_tail": "latency",
+    "error_rates": "errors",
+}
+
+
+def test_capability_skips_use_the_langfuse_and_openai_csv_readers() -> None:
+    """Skips come from the real readers, not a hand-built capability set."""
+    table = load_bundled()
+    usage = _FIXTURES / "openai" / "usage.csv"
+    observations = _FIXTURES / "langfuse" / "observations.json"
+
+    csv_store = load_paths([usage], ReaderConfig())
+    assert csv_store.readers == {"openai_csv"}
+    assert csv_store.capabilities == frozenset()
+    csv_result = analyze(csv_store, table, AnalyzeConfig())
+    csv_reasons = {item.check: item.reason for item in csv_result.skipped}
+    assert set(csv_reasons) == set(_TRACE_CHECKS)
+    for check, reason in csv_reasons.items():
+        assert "the OpenAI usage CSV is cost-only and does not include" in reason
+        assert _MISSING_CAPABILITY[check] in reason
+    assert "--tier-map" not in csv_reasons["model_swap"]
+    assert {item.check for item in csv_result.findings} == {"observability_gap"}
+
+    lang_store = load_paths([observations], ReaderConfig())
+    assert lang_store.readers == {"langfuse"}
+    assert lang_store.capabilities == frozenset(Capability)
+    lang_result = analyze(lang_store, table, AnalyzeConfig())
+    assert {item.check for item in lang_result.skipped} == {"model_swap"}
+    swap_reason = lang_result.skipped[0].reason
+    assert "--tier-map" in swap_reason
+    assert "what-if" in swap_reason
+    rendered = lang_result.to_text() + lang_result.to_json()
+    for canary in _CANARIES:
+        assert canary not in rendered
+
+    mixed = load_paths([usage, observations], ReaderConfig())
+    assert mixed.readers == {"openai_csv", "langfuse"}
+    assert mixed.capabilities == frozenset()
+    mixed_result = analyze(mixed, table, AnalyzeConfig())
+    agent = next(item for item in mixed_result.skipped if item.check == "agent_loops")
+    assert "an input is cost-only and does not include" in agent.reason
+    assert "trace_tree" in agent.reason
+
+    example_csv = analyze(
+        load_paths([_EXAMPLES / "synthetic_openai_usage.csv"], ReaderConfig()),
+        table,
+        AnalyzeConfig(),
+    )
+    cache_reason = next(
+        item.reason for item in example_csv.skipped if item.check == "cache_opportunity"
+    )
+    assert "OpenAI usage CSV is cost-only" in cache_reason
+    example_lang = analyze(
+        load_paths([_EXAMPLES / "synthetic_langfuse.json"], ReaderConfig()),
+        table,
+        AnalyzeConfig(),
+    )
+    assert {item.check for item in example_lang.skipped} == {"model_swap"}
+
+    cli = runner.invoke(app, ["analyze", str(usage), "--json"])
+    assert cli.exit_code == 0, cli.output
+    payload = json.loads(cli.stdout or cli.output)
+    skipped = {item["check"]: item["reason"] for item in payload["skipped_checks"]}
+    assert set(skipped) == set(_TRACE_CHECKS)
+    assert "cost-only" in skipped["latency_tail"]
+    assert {item["check"] for item in payload["findings"]} == {"observability_gap"}
 
 
 def test_batch_savings_do_not_halve_cached_gemini_tokens() -> None:

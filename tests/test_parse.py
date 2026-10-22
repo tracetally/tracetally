@@ -37,6 +37,12 @@ def test_parse_time_accepts_iso_and_unix_units() -> None:
     assert parsed.tzinfo is timezone.utc
     millis = parse_time(1_700_000_000_123)
     assert millis.microsecond == 123_000
+    assert parse_time("2026-10-01 00:00:00") == aware
+    assert parse_time("2026/10/01 00:00:00") == aware
+    assert parse_time("01/13/2026").month == 1
+    assert parse_time("13/01/2026").month == 1
+    with pytest.raises(ValueError, match="ambiguous"):
+        parse_time("10/11/2026")
 
 
 def test_parse_time_rejects_garbage() -> None:

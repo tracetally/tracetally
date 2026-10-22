@@ -16,10 +16,12 @@ def test_builtins_are_registered_through_the_entry_point_group() -> None:
     from importlib.metadata import entry_points
 
     names = {ep.name for ep in entry_points(group="tracetally.readers")}
-    assert {"jsonl", "otel"} <= names
+    assert {"jsonl", "otel", "langfuse", "openai_csv"} <= names
     found = registry()
     assert found["jsonl"] is JsonlReader
     assert found["otel"] is OtelReader
+    assert found["langfuse"].name == "langfuse"
+    assert found["openai_csv"].capabilities == frozenset()
     assert "per_call" in {cap.value for cap in found["jsonl"].capabilities}
 
 

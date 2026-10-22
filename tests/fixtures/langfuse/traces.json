@@ -1,0 +1,40 @@
+{
+  "data": [
+    {
+      "id": "trace-9",
+      "timestamp": "2026-10-03T00:00:00Z",
+      "name": "support.draft",
+      "userId": "user-9",
+      "sessionId": "sess-9",
+      "tags": ["batch"],
+      "observations": [
+        {
+          "id": "gen-9",
+          "type": "GENERATION",
+          "name": "draft",
+          "startTime": "2026-10-03T00:00:00Z",
+          "endTime": "2026-10-03T00:00:02Z",
+          "model": "claude-sonnet-4-5",
+          "usage": {"input": 100, "output": 50, "unit": "TOKENS"},
+          "level": "ERROR",
+          "statusMessage": "HTTP 503 upstream"
+        },
+        {
+          "id": "emb-9",
+          "type": "EMBEDDING",
+          "name": "embed",
+          "startTime": "2026-10-03T00:00:02Z",
+          "model": "text-embedding-3-small",
+          "usageDetails": {"input": 20, "output": 0}
+        }
+      ]
+    },
+    {
+      "id": "trace-empty",
+      "timestamp": "2026-10-03T01:00:00Z",
+      "name": "no-model",
+      "inputTokens": 10,
+      "outputTokens": 1
+    }
+  ]
+}
