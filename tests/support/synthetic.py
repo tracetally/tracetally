@@ -2,7 +2,7 @@
 """Synthetic Acme Support Bot calls shared by the examples and the tests.
 
 The numbers are chosen so costs divide cleanly against the bundled price table.
-This is not the full seeded issue-planter (that lands with the checks).
+Planted endpoints each trigger one check. ``support.control`` is clean.
 """
 
 from __future__ import annotations
@@ -14,8 +14,69 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 
+CANARY = "CANARY_PROMPT_DO_NOT_LEAK"
+# 3000 token-equivalents at the chars/4 estimate used only to bucket prefixes.
+PREFIX_3K = (CANARY + ("P" * 12000))[:12000]
+CONTROL_ENDPOINT = "support.control"
+
+# Observed-window factor is 1 (1 Oct 00:00 through 31 Oct 00:00). Dollars below
+# are the check formulas applied to the planted rows, not a second implementation
+# of the checks.
+PLANTED: dict[str, dict[str, Any]] = {
+    "token_bloat": {
+        "endpoint": "support.bloat",
+        "low": "0.005625",
+        "mid": "0.01125",
+        "high": "0.016875",
+        "what_if": False,
+    },
+    "cache_opportunity": {
+        "endpoint": "support.cache",
+        "low": "0.0045",
+        "mid": "0.00675",
+        "high": "0.0081",
+        "what_if": False,
+    },
+    "batch_candidates": {
+        "endpoint": "support.nightly",
+        "low": "0.00105",
+        "mid": "0.001575",
+        "high": "0.0021",
+        "what_if": False,
+    },
+    "retry_waste": {
+        "endpoint": "support.retry",
+        "low": "0.003",
+        "mid": "0.003",
+        "high": "0.003",
+        "what_if": False,
+    },
+    "agent_loops": {
+        "endpoint": "support.agent",
+        "low": "0.001215",
+        "mid": "0.001215",
+        "high": "0.001215",
+        "what_if": False,
+    },
+    "model_swap": {
+        "endpoint": "support.swap",
+        "low": "0.0846",
+        "mid": "0.0846",
+        "high": "0.0846",
+        "what_if": True,
+    },
+}
+
 
 def calls() -> list[dict[str, Any]]:
+    return _base_calls() + _planted_calls()
+
+
+def spans() -> list[dict[str, Any]]:
+    return _loop_spans()
+
+
+def _base_calls() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for index in range(20):
         status = "ok"
@@ -100,14 +161,205 @@ def calls() -> list[dict[str, Any]]:
     return rows
 
 
+def _planted_calls() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index in range(30):
+        rows.append(
+            _row(
+                record_id=f"bloat-low-{index}",
+                trace_id=f"trace-bloat-low-{index}",
+                endpoint="support.bloat",
+                start_time=f"2026-10-06T{index % 24:02d}:{index % 60:02d}:00Z",
+                input_tokens=5000,
+                output_tokens=100,
+                user_id=f"bloat-user-{index}",
+                session_id=f"bloat-session-{index}",
+            )
+        )
+    for index in range(10):
+        rows.append(
+            _row(
+                record_id=f"bloat-high-{index}",
+                trace_id=f"trace-bloat-high-{index}",
+                endpoint="support.bloat",
+                start_time=f"2026-10-07T{index:02d}:10:00Z",
+                input_tokens=20000,
+                output_tokens=100,
+                user_id=f"bloat-tail-{index}",
+                session_id=f"bloat-tail-session-{index}",
+            )
+        )
+    for index in range(40):
+        rows.append(
+            _row(
+                record_id=f"cache-{index}",
+                trace_id=f"trace-cache-{index}",
+                endpoint="support.cache",
+                start_time=f"2026-10-11T{index % 24:02d}:{index % 60:02d}:00Z",
+                input_tokens=3000,
+                output_tokens=50,
+                prompt=PREFIX_3K,
+                user_id=f"cache-user-{index}",
+                session_id=f"cache-session-{index}",
+            )
+        )
+    for index in range(20):
+        day = 1 + index // 2
+        minute = 5 * (index % 2)
+        rows.append(
+            _row(
+                record_id=f"nightly-{index}",
+                trace_id=f"trace-nightly-{index}",
+                endpoint="support.nightly",
+                start_time=f"2026-10-{day:02d}T02:{minute:02d}:00Z",
+                input_tokens=1000,
+                output_tokens=100,
+                interactive=False,
+            )
+        )
+    for index in range(10):
+        prompt = f"retry-pair-{index}"
+        rows.append(
+            _row(
+                record_id=f"retry-fail-{index}",
+                trace_id=f"trace-retry-{index}",
+                endpoint="support.retry",
+                start_time=f"2026-10-15T{index:02d}:00:00Z",
+                input_tokens=2000,
+                output_tokens=0,
+                status="error",
+                http_status=429,
+                error_type="rate_limit_exceeded",
+                attempt=1,
+                prompt=prompt,
+                user_id=f"retry-user-{index}",
+                session_id=f"retry-session-{index}",
+            )
+        )
+        rows.append(
+            _row(
+                record_id=f"retry-ok-{index}",
+                trace_id=f"trace-retry-{index}",
+                endpoint="support.retry",
+                start_time=f"2026-10-15T{index:02d}:00:30Z",
+                input_tokens=2000,
+                output_tokens=50,
+                attempt=2,
+                prompt=prompt,
+                user_id=f"retry-user-{index}",
+                session_id=f"retry-session-{index}",
+            )
+        )
+    for index in range(30):
+        rows.append(
+            _row(
+                record_id=f"agent-{index}",
+                trace_id=f"trace-agent-{index}",
+                endpoint="support.agent",
+                start_time=f"2026-10-18T{index % 24:02d}:20:00Z",
+                input_tokens=500,
+                output_tokens=100,
+                prompt=f"agent-step-{index}",
+                user_id=f"agent-user-{index}",
+                session_id=f"agent-session-{index}",
+            )
+        )
+    for index in range(10):
+        rows.append(
+            _row(
+                record_id=f"agent-loop-{index}",
+                trace_id="trace-agent-loop",
+                endpoint="support.agent",
+                start_time=f"2026-10-18T12:30:{index:02d}Z",
+                input_tokens=500,
+                output_tokens=100,
+                prompt=f"agent-loop-step-{index}",
+                user_id="agent-loop-user",
+                session_id="agent-loop-session",
+            )
+        )
+    for index in range(20):
+        rows.append(
+            _row(
+                record_id=f"swap-{index}",
+                trace_id=f"trace-swap-{index}",
+                endpoint="support.swap",
+                provider="openai",
+                model="gpt-4o",
+                start_time=f"2026-10-21T{index:02d}:00:00Z",
+                input_tokens=1000,
+                output_tokens=200,
+                prompt=f"swap-{index}",
+                user_id=f"swap-user-{index}",
+                session_id=f"swap-session-{index}",
+            )
+        )
+    for index in range(24):
+        if index == 23:
+            start = "2026-10-31T00:00:00Z"
+        else:
+            start = f"2026-10-{23 + index // 8:02d}T{(index * 3) % 24:02d}:40:00Z"
+        rows.append(
+            _row(
+                record_id=f"control-{index}",
+                trace_id=f"trace-control-{index}",
+                endpoint=CONTROL_ENDPOINT,
+                start_time=start,
+                duration_ms=150,
+                input_tokens=800,
+                output_tokens=200,
+                prompt=f"control-{index}",
+                user_id=f"control-user-{index}",
+                session_id=f"control-session-{index}",
+                interactive=True,
+            )
+        )
+    return rows
+
+
+def _loop_spans() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index in range(6):
+        rows.append(
+            {
+                "kind": "tool",
+                "span_id": f"tool-loop-{index}",
+                "trace_id": "trace-agent-loop",
+                "name": "search_kb",
+                "args_hash": "lookup:kb:v1",
+                "start_time": f"2026-10-18T12:31:{index:02d}Z",
+                "status": "ok",
+                "duration_ms": 15,
+            }
+        )
+    return rows
+
+
+def _row(**overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "duration_ms": 120,
+        "status": "ok",
+        "operation": "chat",
+        "interactive": True,
+    }
+    row.update(overrides)
+    return row
+
+
 def jsonl_text() -> str:
-    return "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in calls())
+    lines = [json.dumps(row, separators=(",", ":")) for row in calls()]
+    lines.extend(json.dumps(row, separators=(",", ":")) for row in spans())
+    return "".join(line + "\n" for line in lines)
 
 
 def otel_document() -> dict[str, Any]:
-    spans: list[dict[str, Any]] = [_tool_span()]
+    span_rows: list[dict[str, Any]] = [_tool_span()]
     for row in calls():
-        spans.append(_llm_span(row))
+        span_rows.append(_llm_span(row))
+    for row in spans():
+        span_rows.append(_tool_from_row(row))
     return {
         "resourceSpans": [
             {
@@ -116,9 +368,24 @@ def otel_document() -> dict[str, Any]:
                         _kv("service.name", "acme-support-bot"),
                     ]
                 },
-                "scopeSpans": [{"scope": {"name": "tracetally.synthetic"}, "spans": spans}],
+                "scopeSpans": [{"scope": {"name": "tracetally.synthetic"}, "spans": span_rows}],
             }
         ]
+    }
+
+
+def tier_map_text() -> str:
+    return "endpoints:\n  support.swap:\n    provider: openai\n    model: gpt-4o-mini\n"
+
+
+def ground_truth_document() -> dict[str, Any]:
+    return {
+        "control_endpoint": CONTROL_ENDPOINT,
+        "planted": PLANTED,
+        "notes": (
+            "Dollars assume a 30-day window (monthly factor 1) and the bundled "
+            "2026-10 price table. model_swap is a what-if."
+        ),
     }
 
 
@@ -128,6 +395,11 @@ def write_examples(root: Path | None = None) -> None:
     (target / "synthetic.jsonl").write_text(jsonl_text(), encoding="utf-8")
     (target / "synthetic_otel.json").write_text(
         json.dumps(otel_document(), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (target / "tiers.example.yaml").write_text(tier_map_text(), encoding="utf-8")
+    (target / "ground_truth.json").write_text(
+        json.dumps(ground_truth_document(), indent=2) + "\n",
         encoding="utf-8",
     )
 
@@ -153,12 +425,22 @@ def _llm_span(row: dict[str, Any]) -> dict[str, Any]:
         attributes.append(_kv("error.type", row["error_type"]))
     if row.get("http_status") is not None:
         attributes.append(_kv("http.response.status_code", int(row["http_status"])))
+    if row.get("prompt"):
+        attributes.append(_kv("gen_ai.input.messages", row["prompt"]))
+    if row.get("user_id"):
+        attributes.append(_kv("user.id", row["user_id"]))
+    if row.get("session_id"):
+        attributes.append(_kv("session.id", row["session_id"]))
+    if row.get("interactive") is not None:
+        attributes.append(_kv("tracetally.interactive", bool(row["interactive"])))
+    if row.get("attempt") is not None:
+        attributes.append(_kv("tracetally.attempt", int(row["attempt"])))
     if row.get("is_batch"):
         attributes.append(_kv("tracetally.batch", True))
     if row.get("reported_cost_usd") is not None:
         attributes.append(_kv("tracetally.reported_cost_usd", row["reported_cost_usd"]))
     status = "STATUS_CODE_ERROR" if row["status"] == "error" else "STATUS_CODE_OK"
-    return {
+    span: dict[str, Any] = {
         "traceId": row["trace_id"],
         "spanId": row["record_id"],
         "name": row["endpoint"],
@@ -166,6 +448,26 @@ def _llm_span(row: dict[str, Any]) -> dict[str, Any]:
         "endTimeUnixNano": str(end_ns),
         "attributes": attributes,
         "status": {"code": status},
+    }
+    if row.get("parent_id"):
+        span["parentSpanId"] = row["parent_id"]
+    return span
+
+
+def _tool_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    start_ns, end_ns = _window(str(row["start_time"]), int(row["duration_ms"]))
+    return {
+        "traceId": row["trace_id"],
+        "spanId": row["span_id"],
+        "name": row["name"],
+        "startTimeUnixNano": str(start_ns),
+        "endTimeUnixNano": str(end_ns),
+        "attributes": [
+            _kv("openinference.span.kind", "TOOL"),
+            _kv("gen_ai.tool.name", row["name"]),
+            _kv("gen_ai.tool.call.arguments", row["args_hash"]),
+        ],
+        "status": {"code": "STATUS_CODE_OK"},
     }
 
 

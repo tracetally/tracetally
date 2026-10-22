@@ -3,6 +3,25 @@
 # Long-context tiers are included only where the publisher states a token threshold.
 # Priority, flex, regional, and audio-only rates are not applied.
 # Retrieved 2026-10-15. This file is not updated at runtime.
+#
+# Batch discount × cached input (verified 2026-10-22, not a flat 50% of every token):
+# - OpenAI pricing page publishes a Batch cached-input column. gpt-5, gpt-5-mini,
+#   and gpt-5-nano list that column at half the standard cached-input rate, so
+#   batch_cached is stack for those models. gpt-4o, gpt-4.1, o-series, and the
+#   other OpenAI rows in this file show "-" there. Those cached tokens stay at
+#   the standard cached-input price (batch_cached: standard). Half of that
+#   cached rate is not a published batch price.
+#   https://developers.openai.com/api/docs/pricing
+# - Anthropic: prompt-caching multipliers stack with the 50% Message Batches
+#   discount, including cache reads. batch_cached is stack.
+#   https://platform.claude.com/docs/en/build-with-claude/batch-processing
+#   https://platform.claude.com/docs/en/about-claude/pricing
+# - Gemini 2.5 Developer API: batch input and output are half of standard.
+#   Batch context-caching prices are the standard context-caching prices, and
+#   the Batch API guide says a cache hit pays the standard context caching
+#   rates. batch_cached is standard. Gemini 3+ stack is not in this table.
+#   https://ai.google.dev/gemini-api/docs/pricing
+#   https://ai.google.dev/gemini-api/docs/batch-api
 schema_version: 1
 table_id: "2026-10"
 currency: USD
@@ -19,6 +38,10 @@ providers:
       value: "0.5"
       source_url: "https://developers.openai.com/api/docs/pricing"
       retrieved_on: "2026-10-15"
+    batch_cached:
+      mode: standard
+      source_url: "https://developers.openai.com/api/docs/pricing"
+      retrieved_on: "2026-10-22"
     models:
       gpt-4o:
         input: "2.50"
@@ -60,18 +83,21 @@ providers:
         input: "1.25"
         cached_input: "0.125"
         output: "10.00"
+        batch_cached: stack
         source_url: "https://developers.openai.com/api/docs/pricing"
         retrieved_on: "2026-10-15"
       gpt-5-mini:
         input: "0.25"
         cached_input: "0.025"
         output: "2.00"
+        batch_cached: stack
         source_url: "https://developers.openai.com/api/docs/pricing"
         retrieved_on: "2026-10-15"
       gpt-5-nano:
         input: "0.05"
         cached_input: "0.005"
         output: "0.40"
+        batch_cached: stack
         source_url: "https://developers.openai.com/api/docs/pricing"
         retrieved_on: "2026-10-15"
       o3:
@@ -114,6 +140,10 @@ providers:
       value: "0.5"
       source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
       retrieved_on: "2026-10-15"
+    batch_cached:
+      mode: stack
+      source_url: "https://platform.claude.com/docs/en/build-with-claude/batch-processing"
+      retrieved_on: "2026-10-22"
     models:
       claude-opus-5-5:
         input: "4"
@@ -194,6 +224,10 @@ providers:
       value: "0.5"
       source_url: "https://ai.google.dev/gemini-api/docs/pricing"
       retrieved_on: "2026-10-15"
+    batch_cached:
+      mode: standard
+      source_url: "https://ai.google.dev/gemini-api/docs/batch-api"
+      retrieved_on: "2026-10-22"
     models:
       gemini-2.5-pro:
         input: "1.25"

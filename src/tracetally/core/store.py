@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Columnar in-memory store.
 
-Numeric columns use ``array`` so a long trace file stays compact. Group-by
-indexes used by the later checks are not built yet. Readers stream into
-``append_call`` and do not retain the raw file.
+Numeric columns use ``array`` so a long trace file stays compact. Readers
+stream into ``append_call`` and do not retain the raw file. ``indexes()``
+groups calls once; appending invalidates that cache.
 """
 
 from __future__ import annotations
@@ -17,6 +17,17 @@ from decimal import Decimal
 from tracetally.core.schema import Capability, LLMCall, Span, Status
 
 _MISSING_HTTP = -1
+_MISSING_ATTEMPT = -1
+_INTERACTIVE_UNKNOWN = 0
+_INTERACTIVE_TRUE = 1
+_INTERACTIVE_FALSE = 2
+
+
+@dataclass
+class StoreIndexes:
+    by_endpoint: dict[str, list[int]]
+    by_trace: dict[str, list[int]]
+    spans_by_trace: dict[str, list[int]]
 
 
 @dataclass
@@ -33,6 +44,9 @@ class TraceStore:
     source: list[str] = field(default_factory=list)
     record_id: list[str] = field(default_factory=list)
     trace_id: list[str | None] = field(default_factory=list)
+    parent_id: list[str | None] = field(default_factory=list)
+    session_id: list[str | None] = field(default_factory=list)
+    user_id: list[str | None] = field(default_factory=list)
     endpoint: list[str] = field(default_factory=list)
     provider: list[str] = field(default_factory=list)
     model: list[str] = field(default_factory=list)
@@ -46,14 +60,19 @@ class TraceStore:
     status: list[str] = field(default_factory=list)
     http_status: array[int] = field(default_factory=lambda: array("i"))
     error_type: list[str | None] = field(default_factory=list)
+    attempt: array[int] = field(default_factory=lambda: array("i"))
     is_batch: array[int] = field(default_factory=lambda: array("b"))
+    interactive: array[int] = field(default_factory=lambda: array("b"))
     reported_cost_usd: list[Decimal | None] = field(default_factory=list)
     content_hash: list[str | None] = field(default_factory=list)
     prefix_hashes: list[tuple[tuple[int, str], ...]] = field(default_factory=list)
+    tool_name: list[str | None] = field(default_factory=list)
+    args_hash: list[str | None] = field(default_factory=list)
     spans: list[Span] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     inputs: list[InputStat] = field(default_factory=list)
     capabilities: frozenset[Capability] | None = None
+    _indexes: StoreIndexes | None = field(default=None, repr=False, compare=False)
 
     def __len__(self) -> int:
         return len(self.source)
@@ -62,6 +81,9 @@ class TraceStore:
         self.source.append(call.source)
         self.record_id.append(call.record_id)
         self.trace_id.append(call.trace_id)
+        self.parent_id.append(call.parent_id)
+        self.session_id.append(call.session_id)
+        self.user_id.append(call.user_id)
         self.endpoint.append(call.endpoint)
         self.provider.append(call.provider)
         self.model.append(call.model)
@@ -82,13 +104,56 @@ class TraceStore:
             _MISSING_HTTP if call.http_status is None else int(call.http_status)
         )
         self.error_type.append(call.error_type)
+        self.attempt.append(_MISSING_ATTEMPT if call.attempt is None else int(call.attempt))
         self.is_batch.append(1 if call.is_batch else 0)
+        self.interactive.append(_interactive_code(call.interactive))
         self.reported_cost_usd.append(call.reported_cost_usd)
         self.content_hash.append(call.content_hash)
         self.prefix_hashes.append(call.prefix_hashes or ())
+        self.tool_name.append(call.tool_name)
+        self.args_hash.append(call.args_hash)
+        self._indexes = None
 
     def append_span(self, span: Span) -> None:
         self.spans.append(span)
+        self._indexes = None
+
+    def indexes(self) -> StoreIndexes:
+        cached = self._indexes
+        if cached is not None:
+            return cached
+        by_endpoint: dict[str, list[int]] = {}
+        by_trace: dict[str, list[int]] = {}
+        for index, endpoint in enumerate(self.endpoint):
+            by_endpoint.setdefault(endpoint, []).append(index)
+            trace_id = self.trace_id[index]
+            if trace_id:
+                by_trace.setdefault(trace_id, []).append(index)
+        spans_by_trace: dict[str, list[int]] = {}
+        for index, span in enumerate(self.spans):
+            if span.trace_id:
+                spans_by_trace.setdefault(span.trace_id, []).append(index)
+        cached = StoreIndexes(
+            by_endpoint=by_endpoint,
+            by_trace=by_trace,
+            spans_by_trace=spans_by_trace,
+        )
+        self._indexes = cached
+        return cached
+
+    def attempt_at(self, index: int) -> int | None:
+        value = int(self.attempt[index])
+        if value == _MISSING_ATTEMPT:
+            return None
+        return value
+
+    def interactive_at(self, index: int) -> bool | None:
+        value = int(self.interactive[index])
+        if value == _INTERACTIVE_TRUE:
+            return True
+        if value == _INTERACTIVE_FALSE:
+            return False
+        return None
 
     def duration_at(self, index: int) -> float | None:
         value = float(self.duration_ms[index])
@@ -111,3 +176,11 @@ class TraceStore:
             self.capabilities = caps
         else:
             self.capabilities = self.capabilities & caps
+
+
+def _interactive_code(value: bool | None) -> int:
+    if value is True:
+        return _INTERACTIVE_TRUE
+    if value is False:
+        return _INTERACTIVE_FALSE
+    return _INTERACTIVE_UNKNOWN

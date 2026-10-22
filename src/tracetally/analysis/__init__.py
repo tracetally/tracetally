@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Summaries over a TraceStore. Checks land in a later milestone."""
+"""Summaries and checks over a TraceStore."""
 
+from tracetally.analysis.engine import Analysis, analyze
 from tracetally.analysis.summary import Summary, summarize
 
-__all__ = ["Summary", "summarize"]
+__all__ = ["Analysis", "Summary", "analyze", "summarize"]

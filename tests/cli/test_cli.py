@@ -30,20 +30,21 @@ def test_summary_on_jsonl_and_otel(tmp_path: Path) -> None:
     assert text.exit_code == 0, text.output
     assert "gpt-4o-mini" in text.output
     assert "support.reply" in text.output
-    assert "0.08665" in text.output
+    assert "0.272410" in text.output
     assert "Offline. No network calls." in text.output
 
     machine = runner.invoke(app, ["summary", str(jsonl), "--json"])
     assert machine.exit_code == 0, machine.output
     payload = json.loads(machine.stdout or machine.output)
-    assert payload["totals"]["cost_usd"] == "0.08665"
-    assert payload["totals"]["calls"] == 31
-    assert payload["error_rates"]["rate_429"] == "0.032258"
+    assert payload["totals"]["cost_usd"] == "0.27241"
+    assert payload["totals"]["calls"] == 235
+    assert payload["error_rates"]["n_429"] == 11
+    assert payload["error_rates"]["rate_429"] == f"{11 / 235:.6f}"
 
     both = runner.invoke(app, ["summary", str(jsonl), str(otel), "--json"])
     assert both.exit_code == 0
     merged = json.loads(both.stdout or both.output)
-    assert merged["totals"]["calls"] == 62
+    assert merged["totals"]["calls"] == 470
 
 
 def test_strict_missing_file_and_unpriced(tmp_path: Path) -> None:

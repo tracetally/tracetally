@@ -20,6 +20,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from importlib.resources import files
 from pathlib import Path
+from typing import Literal
 
 import yaml
 
@@ -32,6 +33,17 @@ _DATE_SUFFIXES = (
     re.compile(r"@\d{4}.*$"),
 )
 _BUNDLED_NAME = "prices-2026-10.yaml"
+
+# How a published batch discount combines with cached-input tokens.
+# stack: cached-input price is multiplied by the batch discount (the provider
+#        publishes that combination).
+# standard: cached tokens stay at the published cached-input price. The batch
+#           discount applies to uncached input and output only.
+# input_rate is intentionally not used. A missing batch cached rate is not
+# filled in with the batch input rate or with half the cached rate.
+BatchCachedMode = Literal["stack", "standard"]
+_BATCH_CACHED_MODES = frozenset({"stack", "standard"})
+_DEFAULT_BATCH_CACHED: BatchCachedMode = "standard"
 
 # gen_ai.provider.name / gen_ai.system values that share one list-price table.
 # Azure and Vertex are intentionally absent: their invoices are not these lists.
@@ -61,6 +73,8 @@ class ModelPrice:
     long_output: Decimal | None = None
     caveat: str | None = None
     batch_discount: Decimal | None = None
+    batch_cached: BatchCachedMode = _DEFAULT_BATCH_CACHED
+    batch_cached_explicit: bool = False
     match: str = "exact"
 
     def with_match(self, match: str) -> ModelPrice:
@@ -79,6 +93,8 @@ class ModelPrice:
             long_output=self.long_output,
             caveat=self.caveat,
             batch_discount=self.batch_discount,
+            batch_cached=self.batch_cached,
+            batch_cached_explicit=self.batch_cached_explicit,
             match=match,
         )
 
@@ -117,20 +133,27 @@ class ModelPrice:
 
         When the call is batched and this provider has no published batch
         discount, the standard price is returned and the flag is false.
+
+        The discount is not a flat multiplier on the whole cost. Cached tokens
+        are multiplied only when ``batch_cached`` is ``stack``. Otherwise they
+        stay at the published cached-input price (``standard``).
         """
         cached = min(max(cached_input_tokens, 0), input_tokens)
         uncached = input_tokens - cached
         input_price, cached_price, output_price = self.rates(input_tokens)
-        amount = (
-            token_cost(uncached, input_price)
-            + token_cost(cached, cached_price)
-            + token_cost(output_tokens, output_price)
-        )
         applied = False
         if is_batch and self.batch_discount is not None:
-            amount *= self.batch_discount
             applied = True
-        return amount, applied
+            input_price *= self.batch_discount
+            output_price *= self.batch_discount
+            if self.batch_cached == "stack":
+                cached_price *= self.batch_discount
+        return (
+            token_cost(uncached, input_price)
+            + token_cost(cached, cached_price)
+            + token_cost(output_tokens, output_price),
+            applied,
+        )
 
 
 @dataclass
@@ -141,6 +164,9 @@ class ProviderPrices:
     batch_discount: Decimal | None
     batch_source_url: str | None
     batch_retrieved_on: date | None
+    batch_cached: BatchCachedMode
+    batch_cached_source_url: str | None
+    batch_cached_retrieved_on: date | None
 
     def resolve(self, model: str) -> ModelPrice | None:
         found = self._lookup(model)
@@ -237,6 +263,9 @@ class PriceTable:
                 batch_discount=bucket.batch_discount,
                 batch_source_url=bucket.batch_source_url,
                 batch_retrieved_on=bucket.batch_retrieved_on,
+                batch_cached=bucket.batch_cached,
+                batch_cached_source_url=bucket.batch_cached_source_url,
+                batch_cached_retrieved_on=bucket.batch_cached_retrieved_on,
             )
             for name, bucket in self.providers.items()
         }
@@ -254,6 +283,10 @@ class PriceTable:
                 current.batch_discount = bucket.batch_discount
                 current.batch_source_url = bucket.batch_source_url
                 current.batch_retrieved_on = bucket.batch_retrieved_on
+            if bucket.batch_cached_source_url is not None:
+                current.batch_cached = bucket.batch_cached
+                current.batch_cached_source_url = bucket.batch_cached_source_url
+                current.batch_cached_retrieved_on = bucket.batch_cached_retrieved_on
             _rebind_batch(current)
         return PriceTable(
             schema_version=self.schema_version,
@@ -338,6 +371,9 @@ def _parse_document(doc: dict[str, object], *, origin: str) -> PriceTable:
 def _parse_provider(name: str, raw: dict[str, object], origin: str) -> ProviderPrices:
     where = f"{origin}: provider {name!r}"
     discount, source, retrieved = _parse_batch(raw.get("batch_discount"), where)
+    batch_cached, cached_source, cached_retrieved = _parse_batch_cached(
+        raw.get("batch_cached"), where
+    )
     models_raw = raw.get("models")
     if not isinstance(models_raw, dict) or not models_raw:
         raise PriceError(f"{where}: models must be a non-empty mapping")
@@ -347,7 +383,7 @@ def _parse_provider(name: str, raw: dict[str, object], origin: str) -> ProviderP
         model = str(model_name).strip()
         if not isinstance(spec, dict):
             raise PriceError(f"{where}: model {model!r} must be a mapping")
-        price = _parse_model(name, model, spec, where, discount)
+        price = _parse_model(name, model, spec, where, discount, batch_cached)
         if model in models:
             raise PriceError(f"{where}: duplicate model {model!r}")
         models[model] = price
@@ -362,6 +398,9 @@ def _parse_provider(name: str, raw: dict[str, object], origin: str) -> ProviderP
         batch_discount=discount,
         batch_source_url=source,
         batch_retrieved_on=retrieved,
+        batch_cached=batch_cached,
+        batch_cached_source_url=cached_source,
+        batch_cached_retrieved_on=cached_retrieved,
     )
 
 
@@ -384,12 +423,29 @@ def _parse_batch(raw: object, where: str) -> tuple[Decimal | None, str | None, d
     return value, source, retrieved
 
 
+def _parse_batch_cached(raw: object, where: str) -> tuple[BatchCachedMode, str | None, date | None]:
+    """Provider rule for batch × cached-input. Omitted means ``standard``.
+
+    ``standard`` does not invent a second discount. A file that wants the
+    discount to stack has to say ``stack`` and cite the page that says so.
+    """
+    if raw is None:
+        return _DEFAULT_BATCH_CACHED, None, None
+    if not isinstance(raw, dict):
+        raise PriceError(f"{where}: batch_cached must be a mapping")
+    source = _require_str(raw, "source_url", f"{where}: batch_cached")
+    _check_url(source, f"{where}: batch_cached")
+    retrieved = _require_date(raw, "retrieved_on", f"{where}: batch_cached")
+    return _batch_cached_mode(raw.get("mode"), f"{where}: batch_cached.mode"), source, retrieved
+
+
 def _parse_model(
     provider: str,
     model: str,
     spec: dict[str, object],
     where: str,
     batch_discount: Decimal | None,
+    batch_cached: BatchCachedMode,
 ) -> ModelPrice:
     loc = f"{where}: model {model!r}"
     input_price = _price_field(spec, "input", loc)
@@ -418,6 +474,11 @@ def _parse_model(
     caveat = spec.get("caveat")
     if caveat is not None and not isinstance(caveat, str):
         raise PriceError(f"{loc}: caveat must be a string")
+    model_cached = spec.get("batch_cached")
+    explicit = model_cached is not None
+    effective_cached = (
+        _batch_cached_mode(model_cached, f"{loc}: batch_cached") if explicit else batch_cached
+    )
     return ModelPrice(
         provider=provider,
         model=model,
@@ -433,6 +494,8 @@ def _parse_model(
         long_output=long_output,
         caveat=str(caveat) if isinstance(caveat, str) else None,
         batch_discount=batch_discount,
+        batch_cached=effective_cached,
+        batch_cached_explicit=explicit,
     )
 
 
@@ -515,10 +578,20 @@ def _drop_aliases(bucket: ProviderPrices, model_name: str) -> None:
         del bucket.aliases[alias]
 
 
+def _batch_cached_mode(value: object, where: str) -> BatchCachedMode:
+    if value == "stack":
+        return "stack"
+    if value == "standard":
+        return "standard"
+    allowed = ", ".join(sorted(_BATCH_CACHED_MODES))
+    raise PriceError(f"{where} must be one of {allowed}")
+
+
 def _rebind_batch(bucket: ProviderPrices) -> None:
     rebound: dict[str, ModelPrice] = {}
     for name, price in bucket.models.items():
-        if price.batch_discount == bucket.batch_discount:
+        cached_mode = price.batch_cached if price.batch_cached_explicit else bucket.batch_cached
+        if price.batch_discount == bucket.batch_discount and cached_mode == price.batch_cached:
             rebound[name] = price
             continue
         rebound[name] = ModelPrice(
@@ -536,6 +609,8 @@ def _rebind_batch(bucket: ProviderPrices) -> None:
             long_output=price.long_output,
             caveat=price.caveat,
             batch_discount=bucket.batch_discount,
+            batch_cached=cached_mode,
+            batch_cached_explicit=price.batch_cached_explicit,
             match=price.match,
         )
     bucket.models = rebound

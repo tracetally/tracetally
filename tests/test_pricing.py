@@ -84,8 +84,12 @@ def test_cost_math_cache_batch_and_long_context() -> None:
     batched, applied = mini.cost(
         input_tokens=1000, cached_input_tokens=200, output_tokens=100, is_batch=True
     )
-    assert batched == Decimal("0.0000975")
+    # gpt-4o-mini publishes no batch cached rate. Cached tokens stay at $0.075.
+    # Uncached input and output take the 50% batch multiplier.
+    # 800 * 0.075 + 200 * 0.075 + 100 * 0.30, per 1M tokens.
+    assert batched == Decimal("0.000105")
     assert applied is True
+    assert mini.batch_cached == "standard"
     no_cache = table.resolve("openai", "gpt-4o-2024-05-13")
     assert no_cache is not None
     plain, _ = no_cache.cost(input_tokens=1_000_000, cached_input_tokens=100, output_tokens=0)
@@ -102,6 +106,44 @@ def test_cost_math_cache_batch_and_long_context() -> None:
     over, _ = haiku.cost(input_tokens=100_001, output_tokens=0)
     assert base == Decimal("0.01")
     assert over == Decimal("100001") * Decimal("0.50") / Decimal(1_000_000)
+
+
+def test_batch_discount_follows_the_published_cached_rule() -> None:
+    """Batch is not a 50% multiplier on every token.
+
+    Numbers are the published per-1M rates, checked against the provider pages
+    on 2026-10-22. A fully cached call makes the rule visible.
+    """
+    table = load_bundled()
+    flash = table.resolve("gemini", "gemini-2.5-flash")
+    assert flash is not None and flash.batch_cached == "standard"
+    flash_batch, applied = flash.cost(
+        input_tokens=1_000_000, cached_input_tokens=1_000_000, output_tokens=0, is_batch=True
+    )
+    assert applied is True
+    assert flash_batch == Decimal("0.03")
+
+    gpt41 = table.resolve("openai", "gpt-4.1")
+    assert gpt41 is not None and gpt41.batch_cached == "standard"
+    gpt41_batch, _ = gpt41.cost(
+        input_tokens=1_000_000, cached_input_tokens=400_000, output_tokens=0, is_batch=True
+    )
+    # 600k uncached at the $1 batch input rate, 400k cached left at $0.50.
+    assert gpt41_batch == Decimal("0.8")
+
+    gpt5 = table.resolve("openai", "gpt-5")
+    assert gpt5 is not None and gpt5.batch_cached == "stack"
+    gpt5_batch, _ = gpt5.cost(
+        input_tokens=1_000_000, cached_input_tokens=1_000_000, output_tokens=0, is_batch=True
+    )
+    assert gpt5_batch == Decimal("0.0625")
+
+    sonnet = table.resolve("anthropic", "claude-sonnet-4-5")
+    assert sonnet is not None and sonnet.batch_cached == "stack"
+    sonnet_batch, _ = sonnet.cost(
+        input_tokens=1_000_000, cached_input_tokens=1_000_000, output_tokens=0, is_batch=True
+    )
+    assert sonnet_batch == Decimal("0.15")
 
 
 def test_override_replaces_and_invalid_files_name_the_field(tmp_path: Path) -> None:
@@ -250,6 +292,56 @@ providers:
         long_input: "2"
 """,
             origin="long.yaml",
+        )
+
+
+def test_merge_keeps_an_explicit_model_batch_cached_mode(tmp_path: Path) -> None:
+    override = tmp_path / "prices.yaml"
+    override.write_text(
+        """
+schema_version: 1
+table_id: "extra"
+currency: USD
+unit: per_1m_tokens
+retrieved_on: "2026-10-15"
+providers:
+  openai:
+    models:
+      acme-private-llm:
+        input: "1"
+        output: "1"
+        source_url: "https://example.com/acme"
+        retrieved_on: "2026-10-15"
+""",
+        encoding="utf-8",
+    )
+    table = load_prices(override)
+    gpt5 = table.resolve("openai", "gpt-5")
+    assert gpt5 is not None and gpt5.batch_cached == "stack"
+    mini = table.resolve("openai", "gpt-4o-mini")
+    assert mini is not None and mini.batch_cached == "standard"
+    with pytest.raises(PriceError, match="batch_cached"):
+        parse_price_text(
+            """
+schema_version: 1
+table_id: "bad-mode"
+currency: USD
+unit: per_1m_tokens
+retrieved_on: "2026-10-22"
+providers:
+  openai:
+    batch_cached:
+      mode: half
+      source_url: "https://example.com/batch"
+      retrieved_on: "2026-10-22"
+    models:
+      m:
+        input: "1"
+        output: "1"
+        source_url: "https://example.com"
+        retrieved_on: "2026-10-22"
+""",
+            origin="mode.yaml",
         )
 
 

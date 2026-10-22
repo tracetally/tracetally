@@ -16,7 +16,7 @@ from typing import Any, ClassVar
 
 from tracetally.config import ReaderConfig
 from tracetally.core.hashing import hash_content_parts
-from tracetally.core.schema import Capability, LLMCall, Span
+from tracetally.core.schema import Capability, LLMCall, Span, SpanKind
 from tracetally.readers.base import BaseReader
 from tracetally.readers.jsonutil import loads
 from tracetally.readers.parse import (
@@ -33,6 +33,7 @@ from tracetally.readers.parse import (
 )
 
 _SIGNAL_KEYS = frozenset({"model", "input_tokens", "output_tokens", "record_id", "provider"})
+_SPAN_KINDS = frozenset({"tool", "retriever", "agent", "other"})
 
 
 # A single pretty-printed JSON document above this size is loaded whole, with a warning.
@@ -129,7 +130,11 @@ class JsonlReader(BaseReader):
     def _yield_record(
         self, parsed: dict[str, Any], *, where: str, cfg: ReaderConfig
     ) -> Iterator[LLMCall | Span]:
+        kind = _optional_str(parsed.get("kind"))
         try:
+            if kind in _SPAN_KINDS:
+                yield _span_from_object(parsed, where=where)
+                return
             yield _call_from_object(parsed, where=where, cfg=cfg)
         except ValueError as exc:
             field, message = _split_error(exc)
@@ -195,6 +200,26 @@ def _call_from_object(obj: dict[str, Any], *, where: str, cfg: ReaderConfig) -> 
         args_hash=_optional_str(obj.get("args_hash")),
         reported_cost_usd=reported,
         attrs=allowlisted_attrs(obj.get("attrs")),
+    )
+
+
+def _span_from_object(obj: dict[str, Any], *, where: str) -> Span:
+    kind = _optional_str(obj.get("kind")) or "other"
+    name = _optional_str(obj.get("name")) or _optional_str(obj.get("tool_name"))
+    if not name:
+        raise ValueError("name: name is required")
+    span_id = _optional_str(obj.get("span_id")) or _optional_str(obj.get("record_id")) or where
+    return Span.model_construct(
+        source="jsonl",
+        trace_id=_optional_str(obj.get("trace_id")),
+        span_id=span_id,
+        parent_id=_optional_str(obj.get("parent_id")),
+        name=name,
+        kind=SpanKind(kind),
+        start_time=parse_time(obj.get("start_time")),
+        duration_ms=parse_float(obj.get("duration_ms"), field="duration_ms"),
+        status=parse_status(obj.get("status"), http_status=None, error_type=None),
+        args_hash=_optional_str(obj.get("args_hash")),
     )
 
 

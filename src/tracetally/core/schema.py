@@ -31,7 +31,7 @@ class SpanKind(str, Enum):
 
 
 class Capability(str, Enum):
-    """What a reader can supply. Checks in later milestones declare requirements."""
+    """What a reader can supply. Each check declares the capabilities it needs."""
 
     PER_CALL = "per_call"
     LATENCY = "latency"
@@ -117,7 +117,7 @@ class Evidence(BaseModel):
 
 
 class Finding(BaseModel):
-    """Public finding shape. The analysis engine that fills these is a later milestone."""
+    """One ranked check result. Dollar fields are a low/mid/high monthly range."""
 
     model_config = ConfigDict(extra="ignore")
 
