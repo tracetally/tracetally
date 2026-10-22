@@ -14,7 +14,9 @@ from rich.console import Console
 from rich.table import Table
 
 from tracetally import __version__
+from tracetally.analysis.skip import run_mode, skipped_for
 from tracetally.core.money import format_usd
+from tracetally.core.schema import Capability, SkippedCheck
 from tracetally.core.stats import percentiles_or_none, rate
 from tracetally.core.store import TraceStore
 from tracetally.pricing.table import ModelPrice, PriceTable
@@ -94,6 +96,10 @@ class Summary:
     n_5xx: int
     n_error: int
     spans: int
+    mode: str
+    latency_measured: bool
+    errors_measured: bool
+    skipped_checks: list[SkippedCheck]
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -121,17 +127,28 @@ class Summary:
                 "unpriced_calls": self.unpriced_calls,
                 "reported_cost_usd": _money(self.reported_cost_usd),
             },
-            "by_model": [_group_dict(group) for group in self.by_model],
-            "by_endpoint_model": [_group_dict(group) for group in self.by_endpoint_model],
+            "by_model": [
+                _group_dict(group, latency_measured=self.latency_measured)
+                for group in self.by_model
+            ],
+            "by_endpoint_model": [
+                _group_dict(group, latency_measured=self.latency_measured)
+                for group in self.by_endpoint_model
+            ],
+            "mode": self.mode,
             "error_rates": {
+                "measured": self.errors_measured,
                 "requests": self.requests,
                 "n_429": self.n_429,
                 "n_5xx": self.n_5xx,
                 "n_error": self.n_error,
-                "rate_429": _rate(self.n_429, self.requests),
-                "rate_5xx": _rate(self.n_5xx, self.requests),
-                "rate_error": _rate(self.n_error, self.requests),
+                "rate_429": _rate(self.n_429, self.requests) if self.errors_measured else None,
+                "rate_5xx": _rate(self.n_5xx, self.requests) if self.errors_measured else None,
+                "rate_error": _rate(self.n_error, self.requests) if self.errors_measured else None,
             },
+            "skipped_checks": [
+                {"check": item.check, "reason": item.reason} for item in self.skipped_checks
+            ],
             "warnings": list(self.warnings),
         }
 
@@ -162,11 +179,23 @@ class Summary:
             f"cost {format_usd(self.cost_usd)} {self.currency}"
         )
         console.print()
-        console.print(_model_table(self.by_model))
+        console.print(_model_table(self.by_model, latency_measured=self.latency_measured))
         console.print()
-        console.print(_endpoint_table(self.by_endpoint_model))
+        console.print(
+            _endpoint_table(self.by_endpoint_model, latency_measured=self.latency_measured)
+        )
         console.print()
         console.print(_error_line(self))
+        if self.mode == "cost-only":
+            console.print(
+                "Cost-only mode. This export has no per-call latency or trace tree. "
+                "Checks that need them were skipped."
+            )
+        if self.skipped_checks:
+            console.print()
+            console.print("Skipped checks")
+            for item in self.skipped_checks:
+                console.print(f"- {item.check}: {item.reason}")
         if self.warnings:
             console.print()
             console.print("Warnings")
@@ -301,7 +330,15 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
         n_5xx=sum(group.n_5xx for group in by_model.values()),
         n_error=sum(group.n_error for group in by_model.values()),
         spans=len(store.spans),
+        mode=run_mode(store.capabilities),
+        latency_measured=_has(store, Capability.LATENCY),
+        errors_measured=_has(store, Capability.ERRORS),
+        skipped_checks=skipped_for(store.capabilities, store.readers),
     )
+
+
+def _has(store: TraceStore, capability: Capability) -> bool:
+    return store.capabilities is not None and capability in store.capabilities
 
 
 def _price_call(
@@ -404,7 +441,7 @@ def _is_5xx(http_status: int | None, error_type: str | None) -> bool:
     return False
 
 
-def _group_dict(group: GroupSummary) -> dict[str, object]:
+def _group_dict(group: GroupSummary, *, latency_measured: bool) -> dict[str, object]:
     latency = group.latency()
     payload: dict[str, object] = {
         "provider": group.provider,
@@ -424,6 +461,7 @@ def _group_dict(group: GroupSummary) -> dict[str, object]:
             "p50": _latency(latency.p50),
             "p95": _latency(latency.p95),
             "p99": _latency(latency.p99),
+            "measured": latency_measured,
         },
         "n_429": group.n_429,
         "n_5xx": group.n_5xx,
@@ -434,7 +472,7 @@ def _group_dict(group: GroupSummary) -> dict[str, object]:
     return payload
 
 
-def _model_table(groups: list[GroupSummary]) -> Table:
+def _model_table(groups: list[GroupSummary], *, latency_measured: bool) -> Table:
     table = Table(title="By model", box=box.ASCII, show_lines=False)
     for column in (
         "Provider",
@@ -463,16 +501,16 @@ def _model_table(groups: list[GroupSummary]) -> Table:
             str(group.output_tokens),
             format_usd(group.cost_usd),
             str(latency.n),
-            _latency_cell(latency.p50, latency.hidden),
-            _latency_cell(latency.p95, latency.hidden),
-            _latency_cell(latency.p99, latency.hidden),
+            _latency_cell(latency.p50, latency.hidden, measured=latency_measured),
+            _latency_cell(latency.p95, latency.hidden, measured=latency_measured),
+            _latency_cell(latency.p99, latency.hidden, measured=latency_measured),
             str(group.n_429),
             str(group.n_5xx),
         )
     return table
 
 
-def _endpoint_table(groups: list[GroupSummary]) -> Table:
+def _endpoint_table(groups: list[GroupSummary], *, latency_measured: bool) -> Table:
     table = Table(title="By endpoint x model", box=box.ASCII, show_lines=False)
     for column in (
         "Endpoint",
@@ -505,9 +543,9 @@ def _endpoint_table(groups: list[GroupSummary]) -> Table:
             str(group.output_tokens),
             format_usd(group.cost_usd),
             str(latency.n),
-            _latency_cell(latency.p50, latency.hidden),
-            _latency_cell(latency.p95, latency.hidden),
-            _latency_cell(latency.p99, latency.hidden),
+            _latency_cell(latency.p50, latency.hidden, measured=latency_measured),
+            _latency_cell(latency.p95, latency.hidden, measured=latency_measured),
+            _latency_cell(latency.p99, latency.hidden, measured=latency_measured),
             str(group.n_429),
             str(group.n_5xx),
         )
@@ -515,6 +553,8 @@ def _endpoint_table(groups: list[GroupSummary]) -> Table:
 
 
 def _error_line(summary: Summary) -> str:
+    if not summary.errors_measured:
+        return "Error rates  not measured (this export has no status or error type)"
     return (
         "Error rates  "
         f"429 {_rate(summary.n_429, summary.requests) or '-'} "
@@ -526,7 +566,9 @@ def _error_line(summary: Summary) -> str:
     )
 
 
-def _latency_cell(value: float | None, hidden: bool) -> str:
+def _latency_cell(value: float | None, hidden: bool, *, measured: bool) -> str:
+    if not measured:
+        return "n/a"
     if hidden:
         return "n<20"
     return _latency(value) or "-"

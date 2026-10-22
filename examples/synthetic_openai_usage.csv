@@ -1,0 +1,2 @@
+start_time,model,project_id,num_model_requests,input_tokens,output_tokens,input_cached_tokens
+2026-10-01T00:00:00Z,gpt-4o-mini,proj_demo,4,8000,400,2000

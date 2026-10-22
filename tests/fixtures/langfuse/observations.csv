@@ -1,0 +1,5 @@
+ID,Trace ID,Type,Name,Start Time,End Time,Model,Input Tokens,Output Tokens,Total Cost ($),Level,User ID,Session ID,Parent Observation ID,Status Message,Comment
+gen-2,trace-2,GENERATION,support.reply,2026/10/02 00:00:00,2026/10/02 00:00:01,gpt-4o-mini,500,25,0.004,DEFAULT,user-2,sess-2,,,kept
+tool-2,trace-2,TOOL,search,21/10/2026 00:00:00,,search.docs,,,,,user-2,sess-2,gen-2,,ignored
+bad-2,trace-2,GENERATION,broken,2026-10-02T00:00:03Z,,,,,,,ERROR,user-2,sess-2,,429 too many requests,x
+span-2,trace-2,AGENT,planner,2026-10-02T00:00:04Z,,,,,,,,,user-2,sess-2,gen-2,,

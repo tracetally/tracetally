@@ -54,6 +54,7 @@ class TraceStore:
     warnings: list[str] = field(default_factory=list)
     inputs: list[InputStat] = field(default_factory=list)
     capabilities: frozenset[Capability] | None = None
+    readers: set[str] = field(default_factory=set)
 
     def __len__(self) -> int:
         return len(self.source)
@@ -111,3 +112,6 @@ class TraceStore:
             self.capabilities = caps
         else:
             self.capabilities = self.capabilities & caps
+
+    def note_reader(self, name: str) -> None:
+        self.readers.add(name)

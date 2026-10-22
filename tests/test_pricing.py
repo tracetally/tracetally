@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -19,18 +19,18 @@ GEMINI = "https://ai.google.dev/gemini-api/docs/pricing"
 def test_bundled_table_is_sourced_and_covers_three_providers() -> None:
     table = load_bundled()
     assert table.table_id == "2026-10"
-    assert table.retrieved_on == date(2026, 10, 15)
+    assert table.retrieved_on == date(2026, 10, 22)
     assert set(table.providers) == {"openai", "anthropic", "gemini"}
-    assert len(table.iter_models()) >= 25
+    assert len(table.iter_models()) >= 40
     for price in table.iter_models():
         assert price.source_url.startswith("https://")
-        assert price.retrieved_on == date(2026, 10, 15)
+        assert price.retrieved_on == date(2026, 10, 22)
         assert price.input >= 0
         assert price.output >= 0
     for name, bucket in table.providers.items():
         assert bucket.batch_discount == Decimal("0.5")
         assert bucket.batch_source_url
-        assert bucket.batch_retrieved_on == date(2026, 10, 15)
+        assert bucket.batch_retrieved_on == date(2026, 10, 22)
         assert name
 
 
@@ -53,6 +53,23 @@ def test_known_standard_rates() -> None:
     assert flash is not None and flash.input == Decimal("0.30")
     assert flash.source_url == GEMINI
     assert table.resolve("gcp.gemini", "gemini-2.5-pro") is not None
+    gpt5 = table.resolve("openai", "gpt-5")
+    assert gpt5 is not None and gpt5.reasoning == gpt5.output == Decimal("10")
+    plain, _ = gpt5.cost(input_tokens=0, output_tokens=1_000_000)
+    assert plain == Decimal("10")
+    assert table.resolve("openai", "gpt-4o").reasoning is None
+    assert table.resolve("anthropic", "claude-sonnet-4-5").reasoning is None
+    flash_price = table.resolve("gemini", "gemini-2.5-flash")
+    assert flash_price is not None and flash_price.reasoning == Decimal("2.50")
+    preview = table.resolve("gemini", "gemini-3.1-pro-preview")
+    assert preview is not None and preview.long_output == Decimal("18")
+    hosts = (
+        "https://developers.openai.com/api/docs/pricing",
+        "https://platform.claude.com/docs/en/about-claude/pricing",
+        "https://ai.google.dev/gemini-api/docs/pricing",
+    )
+    for price in table.iter_models():
+        assert price.source_url in hosts
 
 
 def test_resolution_is_exact_alias_or_date_suffix_and_never_a_guess() -> None:
@@ -67,8 +84,7 @@ def test_resolution_is_exact_alias_or_date_suffix_and_never_a_guess() -> None:
     assert table.resolve("openai", "gpt-4o-mini-ultra") is None
     assert table.resolve("openai", "gpt-5-mini-special") is None
     assert table.resolve("openai", "GPT-4o-mini") is None
-    turbo_1106 = table.resolve("openai", "gpt-3.5-turbo-1106")
-    assert turbo_1106 is not None and turbo_1106.input == Decimal("1")
+    assert table.resolve("openai", "gpt-3.5-turbo-1106") is None
     assert table.resolve("vertex_ai", "gemini-2.5-flash") is None
     assert table.resolve("azure.ai.openai", "gpt-4o-mini") is None
     assert table.resolve("unknown", "gpt-4o-mini") is None
@@ -162,9 +178,9 @@ providers:
 
 def test_freshness_check_is_injected_not_a_wall_clock_failure() -> None:
     table = load_bundled()
-    table.assert_fresh(date(2026, 10, 15), max_age_days=60)
+    table.assert_fresh(table.retrieved_on, max_age_days=60)
     with pytest.raises(PriceError, match="60"):
-        table.assert_fresh(date(2026, 12, 20), max_age_days=60)
+        table.assert_fresh(table.retrieved_on + timedelta(days=61), max_age_days=60)
 
 
 def test_price_file_rejects_malformed_documents(tmp_path: Path) -> None:
