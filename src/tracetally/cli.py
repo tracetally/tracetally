@@ -11,8 +11,9 @@ from typing import Annotated
 import typer
 
 from tracetally import __version__
+from tracetally.analysis.engine import analyze
 from tracetally.analysis.summary import summarize
-from tracetally.config import ReaderConfig
+from tracetally.config import AnalyzeConfig, ReaderConfig, load_check_params, load_tier_map
 from tracetally.core.errors import PriceError, ReaderError, UsageError
 from tracetally.pricing.table import ModelPrice, PriceTable, load_prices
 from tracetally.readers.base import load_paths, registry, registry_problems
@@ -93,6 +94,82 @@ def summary_command(
         typer.echo("error: no LLM calls were read", err=True)
         raise typer.Exit(code=EXIT_INPUT)
     if result.priced_calls == 0:
+        typer.echo("error: no priced records", err=True)
+        raise typer.Exit(code=EXIT_UNPRICED)
+
+
+@app.command("analyze")
+def analyze_command(
+    files: Annotated[list[Path], typer.Argument(help="Trace files. JSONL or OTLP JSON.")],
+    format_name: Annotated[
+        str | None,
+        typer.Option("--format", help="Force jsonl or otel. Default: sniff each file."),
+    ] = None,
+    endpoint_attr: Annotated[
+        str | None,
+        typer.Option("--endpoint-attr", help="Attribute or JSONL field used as the endpoint."),
+    ] = None,
+    prices: Annotated[
+        Path | None,
+        typer.Option("--prices", help="YAML price file merged over the bundled table."),
+    ] = None,
+    tier_map: Annotated[
+        Path | None,
+        typer.Option("--tier-map", help="YAML map of endpoint to a cheaper model. What-if only."),
+    ] = None,
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", help="YAML thresholds for the checks."),
+    ] = None,
+    only: Annotated[
+        list[str] | None,
+        typer.Option("--only", help="Run only this check. Repeat for several."),
+    ] = None,
+    skip: Annotated[
+        list[str] | None,
+        typer.Option("--skip", help="Skip this check. Repeat for several."),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Print machine-readable JSON."),
+    ] = False,
+    strict: Annotated[
+        bool,
+        typer.Option("--strict", help="Fail on the first malformed line or invalid record."),
+    ] = False,
+) -> None:
+    """Rank cost and reliability findings. Model swap is labelled what-if."""
+    if not files:
+        raise typer.BadParameter("provide at least one trace file")
+    try:
+        store = load_paths(
+            list(files),
+            ReaderConfig(
+                endpoint_attr=endpoint_attr,
+                strict=strict,
+                format_name=format_name,
+            ),
+        )
+        table = load_prices(prices)
+        selected = AnalyzeConfig(
+            tier_map=load_tier_map(tier_map) if tier_map is not None else {},
+            params=load_check_params(config) if config is not None else AnalyzeConfig().params,
+            only=frozenset(only) if only else None,
+            skip=frozenset(skip or []),
+        )
+        result = analyze(store, table, selected)
+    except UsageError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_USAGE) from exc
+    except (ReaderError, PriceError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_INPUT) from exc
+    rendered = result.to_json() if json_output else result.to_text()
+    typer.echo(rendered, nl=not rendered.endswith("\n"))
+    if result.summary.calls == 0:
+        typer.echo("error: no LLM calls were read", err=True)
+        raise typer.Exit(code=EXIT_INPUT)
+    if result.summary.priced_calls == 0:
         typer.echo("error: no priced records", err=True)
         raise typer.Exit(code=EXIT_UNPRICED)
 
@@ -213,4 +290,5 @@ def _price_row(table: PriceTable, price: ModelPrice) -> dict[str, object]:
         "batch_discount": None
         if bucket.batch_discount is None
         else format(bucket.batch_discount, "f"),
+        "batch_cached": price.batch_cached,
     }

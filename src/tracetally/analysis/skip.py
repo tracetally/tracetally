@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Which planned checks a run cannot execute.
+"""Which checks a run cannot execute.
 
-The checks themselves land in a later milestone. This module only records the
-skip when the loaded readers do not provide what the check needs, so a
-cost-only export states that instead of looking like a clean bill of health.
+A cost-only export lists the checks it cannot run, with the missing
+capability, instead of looking like a clean bill of health.
 """
 
 from __future__ import annotations
@@ -55,7 +54,7 @@ PLANNED_CHECKS: tuple[PlannedCheck, ...] = (
         "a routing what-if reprices individual calls",
     ),
     PlannedCheck(
-        "latency_percentiles",
+        "latency_tail",
         frozenset({Capability.LATENCY}),
         "percentiles need a duration on each call",
     ),
@@ -65,6 +64,23 @@ PLANNED_CHECKS: tuple[PlannedCheck, ...] = (
         "429 and 5xx rates need a status or error type",
     ),
 )
+
+
+def missing_capability_reason(
+    missing: frozenset[Capability],
+    readers: set[str] | frozenset[str] | None,
+    detail: str,
+) -> str:
+    """One sentence for a check the loaded readers cannot support."""
+    joined = ", ".join(sorted(cap.value for cap in missing))
+    names = set(readers or ())
+    if names == {"openai_csv"}:
+        source = "the OpenAI usage CSV is cost-only and does not include"
+    elif "openai_csv" in names:
+        source = "an input is cost-only and does not include"
+    else:
+        source = "the loaded inputs do not include"
+    return f"needs {joined}; {source} {joined}. {detail}"
 
 
 def run_mode(capabilities: frozenset[Capability] | None) -> str:
@@ -90,17 +106,10 @@ def skipped_for(
         missing = tuple(sorted(spec.requires - capabilities, key=lambda cap: cap.value))
         if not missing:
             continue
-        joined = ", ".join(cap.value for cap in missing)
-        if names == {"openai_csv"}:
-            source = "the OpenAI usage CSV is cost-only and does not include"
-        elif "openai_csv" in names:
-            source = "an input is cost-only and does not include"
-        else:
-            source = "the loaded inputs do not include"
         skipped.append(
             SkippedCheck(
                 check=spec.check,
-                reason=f"needs {joined}; {source} {joined}. {spec.detail}",
+                reason=missing_capability_reason(frozenset(missing), names, spec.detail),
             )
         )
     return skipped

@@ -26,6 +26,11 @@ SUMMARY_SCHEMA_VERSION = 1
 METHODOLOGY = (
     "Costs are list prices per 1M tokens from the named price table. "
     "Cached tokens use cached_input when published, otherwise the input price. "
+    "A batch discount applies to uncached input and output. It also applies to "
+    "cached tokens only when that model's batch_cached rule is stack "
+    "(Anthropic, and OpenAI models whose batch table publishes a cached rate). "
+    "Gemini 2.5 and OpenAI models with no published batch cached rate keep the "
+    "standard cached-input price. "
     "Reasoning tokens are reported separately and are not added on top of output tokens. "
     "Long-context rates apply only where the table publishes a token threshold. "
     "Unknown models are left unpriced."

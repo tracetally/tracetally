@@ -16,9 +16,28 @@
 # audio / image / priority / flex / regional rates, and Anthropic Fable and
 # Mythos (the page uses marketing names and this table does not guess API ids).
 # gpt-3.5-turbo-1106 is not on the OpenAI pricing page and is not listed.
-# batch_discount is the published 50% Batch API multiplier applied to the
-# whole computed cost. A few published batch tables do not halve cached input;
-# that exception is not modeled separately.
+#
+# Batch discount × cached input (verified 2026-10-22, not a flat 50% of every token):
+# - OpenAI's batch table publishes a cached-input column at half the standard
+#   cached rate for gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.1, gpt-5.2,
+#   gpt-5.4-mini, and gpt-5.4-nano. Those models set batch_cached: stack.
+#   gpt-4o, gpt-4.1, the o-series, gpt-5-pro, gpt-5.2-pro, and the other OpenAI
+#   rows show "-" there. Those cached tokens stay at the standard cached-input
+#   price. Half of a "-" rate is not published.
+#   https://developers.openai.com/api/docs/pricing
+# - Anthropic: prompt-caching multipliers stack with the 50% Message Batches
+#   discount, including cache reads. batch_cached is stack.
+#   https://platform.claude.com/docs/en/build-with-claude/batch-processing
+#   https://platform.claude.com/docs/en/about-claude/pricing
+# - Gemini 2.5, gemini-3-flash-preview, and gemini-3.1-pro-preview publish batch
+#   context-caching prices equal to the standard cache prices ("Same as
+#   Standard"). batch_cached stays standard. gemini-3.1-flash-lite publishes a
+#   batch cache price at half the standard cache price, so that model is stack.
+#   gemini-3.5-flash-lite publishes a batch cache price of $0.02, which is
+#   neither the standard $0.03 nor half of it. This file has no third rate, so
+#   those cached tokens stay at $0.03 rather than inventing $0.015.
+#   https://ai.google.dev/gemini-api/docs/pricing
+#   https://ai.google.dev/gemini-api/docs/batch-api
 schema_version: 1
 table_id: "2026-10"
 currency: USD
@@ -34,6 +53,10 @@ providers:
   openai:
     batch_discount:
       value: "0.5"
+      source_url: "https://developers.openai.com/api/docs/pricing"
+      retrieved_on: "2026-10-22"
+    batch_cached:
+      mode: standard
       source_url: "https://developers.openai.com/api/docs/pricing"
       retrieved_on: "2026-10-22"
     models:
@@ -78,6 +101,7 @@ providers:
         cached_input: "0.125"
         output: "10.00"
         reasoning: "10.00"
+        batch_cached: stack
         caveat: "Reasoning tokens are included in output tokens and billed at the output rate, so they are not added again."
         source_url: "https://developers.openai.com/api/docs/pricing"
         retrieved_on: "2026-10-22"
@@ -86,6 +110,7 @@ providers:
         cached_input: "0.025"
         output: "2.00"
         reasoning: "2.00"
+        batch_cached: stack
         caveat: "Reasoning tokens are included in output tokens and billed at the output rate, so they are not added again."
         source_url: "https://developers.openai.com/api/docs/pricing"
         retrieved_on: "2026-10-22"
@@ -94,6 +119,7 @@ providers:
         cached_input: "0.005"
         output: "0.40"
         reasoning: "0.40"
+        batch_cached: stack
         caveat: "Reasoning tokens are included in output tokens and billed at the output rate, so they are not added again."
         source_url: "https://developers.openai.com/api/docs/pricing"
         retrieved_on: "2026-10-22"
@@ -109,6 +135,7 @@ providers:
         cached_input: "0.125"
         output: "10.00"
         reasoning: "10.00"
+        batch_cached: stack
         caveat: "Reasoning tokens are included in output tokens and billed at the output rate, so they are not added again."
         source_url: "https://developers.openai.com/api/docs/pricing"
         retrieved_on: "2026-10-22"
@@ -117,6 +144,7 @@ providers:
         cached_input: "0.175"
         output: "14.00"
         reasoning: "14.00"
+        batch_cached: stack
         caveat: "Reasoning tokens are included in output tokens and billed at the output rate, so they are not added again."
         source_url: "https://developers.openai.com/api/docs/pricing"
         retrieved_on: "2026-10-22"
@@ -132,6 +160,7 @@ providers:
         cached_input: "0.075"
         output: "4.50"
         reasoning: "4.50"
+        batch_cached: stack
         caveat: "Reasoning tokens are included in output tokens and billed at the output rate, so they are not added again."
         source_url: "https://developers.openai.com/api/docs/pricing"
         retrieved_on: "2026-10-22"
@@ -140,6 +169,7 @@ providers:
         cached_input: "0.02"
         output: "1.25"
         reasoning: "1.25"
+        batch_cached: stack
         caveat: "Reasoning tokens are included in output tokens and billed at the output rate, so they are not added again."
         source_url: "https://developers.openai.com/api/docs/pricing"
         retrieved_on: "2026-10-22"
@@ -210,6 +240,10 @@ providers:
     batch_discount:
       value: "0.5"
       source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+      retrieved_on: "2026-10-22"
+    batch_cached:
+      mode: stack
+      source_url: "https://platform.claude.com/docs/en/build-with-claude/batch-processing"
       retrieved_on: "2026-10-22"
     models:
       claude-opus-5-5:
@@ -291,6 +325,10 @@ providers:
       value: "0.5"
       source_url: "https://ai.google.dev/gemini-api/docs/pricing"
       retrieved_on: "2026-10-22"
+    batch_cached:
+      mode: standard
+      source_url: "https://ai.google.dev/gemini-api/docs/batch-api"
+      retrieved_on: "2026-10-22"
     models:
       gemini-2.5-pro:
         input: "1.25"
@@ -353,6 +391,7 @@ providers:
         cached_input: "0.025"
         output: "1.50"
         reasoning: "1.50"
+        batch_cached: stack
         caveat: "Text, image, and video input rate. Thinking tokens are included in the output price and are not added again. Audio input is priced separately by Google and is not applied."
         source_url: "https://ai.google.dev/gemini-api/docs/pricing"
         retrieved_on: "2026-10-22"

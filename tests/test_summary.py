@@ -27,27 +27,55 @@ def test_summary_cost_latency_and_error_rates(tmp_path: Path) -> None:
     from_jsonl = summarize(load_paths([jsonl], ReaderConfig()), table)
     from_otel = summarize(load_paths([otel], ReaderConfig()), table)
 
-    assert len(calls()) == 31
+    assert len(calls()) == 235
+    million = Decimal(1_000_000)
     mini = Decimal("0.000195") * 20
     claude = Decimal("0.0135") * 4 + Decimal("0.0135") * Decimal("0.5")
     gemini = Decimal("0.0055") * 4
-    expected = mini + claude + gemini
-    assert expected == Decimal("0.08665")
+    base = mini + claude + gemini
+    assert base == Decimal("0.08665")
+    # Planted rows use the same bundled rates. The original 31 calls are unchanged.
+    bloat = (
+        Decimal(30) * (Decimal(5000) * Decimal("0.15") + Decimal(100) * Decimal("0.60"))
+        + Decimal(10) * (Decimal(20000) * Decimal("0.15") + Decimal(100) * Decimal("0.60"))
+    ) / million
+    cache = (
+        Decimal(40) * (Decimal(3000) * Decimal("0.15") + Decimal(50) * Decimal("0.60")) / million
+    )
+    nightly = (
+        Decimal(20) * (Decimal(1000) * Decimal("0.15") + Decimal(100) * Decimal("0.60")) / million
+    )
+    retry = (
+        Decimal(10) * (Decimal(2000) * Decimal("0.15"))
+        + Decimal(10) * (Decimal(2000) * Decimal("0.15") + Decimal(50) * Decimal("0.60"))
+    ) / million
+    agent = (
+        Decimal(40) * (Decimal(500) * Decimal("0.15") + Decimal(100) * Decimal("0.60")) / million
+    )
+    swap = Decimal(20) * (Decimal(1000) * Decimal("2.50") + Decimal(200) * Decimal("10")) / million
+    control = (
+        Decimal(24) * (Decimal(800) * Decimal("0.15") + Decimal(200) * Decimal("0.60")) / million
+    )
+    expected = base + bloat + cache + nightly + retry + agent + swap + control
+    assert expected == Decimal("0.27241")
 
-    for result, spans in ((from_jsonl, 0), (from_otel, 1)):
-        assert result.calls == 31
-        assert result.requests == 31
+    for result, spans in ((from_jsonl, 6), (from_otel, 7)):
+        assert result.calls == 235
+        assert result.requests == 235
         assert result.spans == spans
-        assert result.priced_calls == 29
+        assert result.priced_calls == 233
         assert result.unpriced_calls == 2
         assert result.cost_usd == expected
-        assert result.n_429 == 1
+        assert result.n_429 == 11
         assert result.n_5xx == 1
-        assert result.n_error == 2
+        assert result.n_error == 12
         assert result.reported_cost_usd == Decimal("0.02")
         assert result.reasoning_tokens == 400
         by_model = {(row.provider, row.model): row for row in result.by_model}
-        reply = by_model[("openai", "gpt-4o-mini")]
+        by_endpoint = {
+            (row.endpoint, row.provider, row.model): row for row in result.by_endpoint_model
+        }
+        reply = by_endpoint[("support.reply", "openai", "gpt-4o-mini")]
         assert reply.latency().p50 == pytest_approx(195)
         assert reply.latency().p95 == pytest_approx(280.5)
         assert reply.latency().p99 == pytest_approx(288.1)
@@ -65,12 +93,12 @@ def test_summary_cost_latency_and_error_rates(tmp_path: Path) -> None:
         assert "gpt-4o-mini" in text
         assert "support.reply" in text
         assert "n<20" in text
-        assert "0.08665" in text
+        assert "0.272410" in text
         assert "acme-private-llm" in text
         payload = result.to_dict()
         assert payload["summary_schema_version"] == 1
-        assert payload["totals"]["cost_usd"] == "0.08665"
-        assert payload["error_rates"]["n_429"] == 1
+        assert payload["totals"]["cost_usd"] == "0.27241"
+        assert payload["error_rates"]["n_429"] == 11
         assert payload["error_rates"]["n_5xx"] == 1
         assert payload["mode"] == "trace"
         assert payload["skipped_checks"] == []

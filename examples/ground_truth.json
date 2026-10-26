@@ -1,0 +1,48 @@
+{
+  "control_endpoint": "support.control",
+  "planted": {
+    "token_bloat": {
+      "endpoint": "support.bloat",
+      "low": "0.005625",
+      "mid": "0.01125",
+      "high": "0.016875",
+      "what_if": false
+    },
+    "cache_opportunity": {
+      "endpoint": "support.cache",
+      "low": "0.0045",
+      "mid": "0.00675",
+      "high": "0.0081",
+      "what_if": false
+    },
+    "batch_candidates": {
+      "endpoint": "support.nightly",
+      "low": "0.00105",
+      "mid": "0.001575",
+      "high": "0.0021",
+      "what_if": false
+    },
+    "retry_waste": {
+      "endpoint": "support.retry",
+      "low": "0.003",
+      "mid": "0.003",
+      "high": "0.003",
+      "what_if": false
+    },
+    "agent_loops": {
+      "endpoint": "support.agent",
+      "low": "0.001215",
+      "mid": "0.001215",
+      "high": "0.001215",
+      "what_if": false
+    },
+    "model_swap": {
+      "endpoint": "support.swap",
+      "low": "0.0846",
+      "mid": "0.0846",
+      "high": "0.0846",
+      "what_if": true
+    }
+  },
+  "notes": "Dollars assume a 30-day window (monthly factor 1) and the bundled 2026-10 price table. model_swap is a what-if."
+}

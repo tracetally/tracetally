@@ -76,7 +76,7 @@ def test_cost_csv_uses_aliases_and_keeps_reported_cost() -> None:
     assert result.reported_cost_usd == Decimal("1.25")
     names = {item.check for item in result.skipped_checks}
     assert "agent_loops" in names
-    assert "latency_percentiles" in names
+    assert "latency_tail" in names
     assert "error_rates" in names
     assert "cache_opportunity" in names
     text = result.to_text()
