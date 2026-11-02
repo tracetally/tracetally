@@ -25,8 +25,9 @@ python -m pip install -e ".[dev]"
 ```
 
 The published install (`pipx install tracetally`, `uv tool install tracetally`,
-or `pip install tracetally`) lands with the 0.1.0 release. The package does
-not call the network at runtime.
+or `pip install tracetally`) lands with the 0.1.0 release. Pushing the tag
+`v0.1.0` is what starts that publish. The package does not call the network
+at runtime.
 
 ## Try it
 
@@ -405,6 +406,36 @@ you change a route. The report says this in the methodology section.
 Built by Arockia. If you want this run on your production traces, with a
 written, prioritised fix plan, I do LLM cost and reliability audits. The work
 stays read-only: you export the files, and nothing is routed through a gateway.
+
+## Release
+
+`pyproject.toml` stays at `0.1.0.dev0` until the commit that is tagged. The
+version string PyPI receives is that field on the tagged commit, so set it
+to `0.1.0` in the release commit before tagging.
+
+Pushing a tag that matches `v*` runs `.github/workflows/release.yml`. For
+this release the tag is `v0.1.0`. The build job runs `python -m build`
+(hatchling) and uploads the sdist and wheel. The publish job runs only on a
+`v*` tag. It uses `pypa/gh-action-pypi-publish` with PyPI Trusted Publishing
+(`id-token: write`) and the GitHub Actions environment named `pypi`. That
+environment has required reviewers. A reviewer approves it, then the upload
+runs. The workflow does not use a `PYPI_API_TOKEN` secret. A manual
+`workflow_dispatch` builds the same artifacts and publishes only when the
+selected ref is a `v*` tag.
+
+## Project page
+
+`docs/index.html` is the static page for
+`https://tracetally.github.io/tracetally/`. CSS is inline. The page does not
+load remote fonts or scripts. Pages is not enabled from this repo.
+
+After the repository is public, an owner turns it on in the GitHub settings
+(this is a click in the UI, not a workflow):
+
+Settings → Pages → Build and deployment → Source: Deploy from a branch →
+Branch: the default branch (`main`) → Folder: `/docs` → Save.
+
+No custom domain. The site is the project URL above once that save succeeds.
 
 ## License
 
