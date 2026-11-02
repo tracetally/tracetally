@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from tracetally.config import ReaderConfig
-from tracetally.core.hashing import content_hash, hash_content_parts
+from tracetally.core.hashing import content_hash, hash_content_parts, retained_content
 from tracetally.core.schema import Capability, LLMCall, Span, SpanKind, Status
 from tracetally.readers.base import BaseReader
 from tracetally.readers.jsonutil import loads
@@ -256,7 +256,9 @@ def _span_from_otlp(
     if cached is not None and cached > input_tokens:
         raise ValueError("cached_input_tokens: cached_input_tokens exceeds input_tokens")
 
-    digest, prefixes = _hash_attrs(attrs)
+    parts = _content_parts(attrs)
+    digest, prefixes = hash_content_parts(parts)
+    content = retained_content(parts) if cfg.include_content else None
     provider = _first_str(attrs, _PROVIDER_KEYS) or "unknown"
     endpoint = _endpoint(attrs, name, cfg)
     is_batch = parse_bool(attrs.get("tracetally.batch"))
@@ -289,6 +291,7 @@ def _span_from_otlp(
         interactive=interactive,
         prefix_hashes=prefixes or None,
         content_hash=digest,
+        content=content,
         tool_name=_first_str(attrs, _TOOL_KEYS),
         args_hash=_args_hash(attrs),
         reported_cost_usd=_reported_cost(attrs),
@@ -330,12 +333,12 @@ def _endpoint(attrs: dict[str, Any], span_name: str, cfg: ReaderConfig) -> str:
     return span_name or "(unknown)"
 
 
-def _hash_attrs(attrs: dict[str, Any]) -> tuple[str | None, tuple[tuple[int, str], ...]]:
+def _content_parts(attrs: dict[str, Any]) -> list[str]:
     parts: list[str] = []
     for key, value in attrs.items():
         if content_key(str(key)):
             parts.extend(text_fragments(value))
-    return hash_content_parts(parts)
+    return parts
 
 
 _REPORTED_COST_KEYS = (

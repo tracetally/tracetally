@@ -4,17 +4,19 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+import secrets
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from tracetally import __version__
-from tracetally.analysis.engine import analyze
+from tracetally.analysis.engine import Analysis, analyze
 from tracetally.analysis.summary import summarize
 from tracetally.config import AnalyzeConfig, ReaderConfig, load_check_params, load_tier_map
 from tracetally.core.errors import PriceError, ReaderError, UsageError
+from tracetally.core.store import TraceStore
 from tracetally.pricing.table import ModelPrice, PriceTable, load_prices
 from tracetally.readers.base import load_paths, registry, registry_problems
 
@@ -100,7 +102,10 @@ def summary_command(
 
 @app.command("analyze")
 def analyze_command(
-    files: Annotated[list[Path], typer.Argument(help="Trace files. JSONL or OTLP JSON.")],
+    files: Annotated[
+        list[Path],
+        typer.Argument(help="Trace files. JSONL, OTLP JSON, Langfuse export, or OpenAI usage CSV."),
+    ],
     format_name: Annotated[
         str | None,
         typer.Option("--format", help="Force jsonl or otel. Default: sniff each file."),
@@ -142,22 +147,17 @@ def analyze_command(
     if not files:
         raise typer.BadParameter("provide at least one trace file")
     try:
-        store = load_paths(
-            list(files),
-            ReaderConfig(
-                endpoint_attr=endpoint_attr,
-                strict=strict,
-                format_name=format_name,
-            ),
+        _store, result = _open_analysis(
+            files,
+            format_name=format_name,
+            endpoint_attr=endpoint_attr,
+            prices=prices,
+            tier_map=tier_map,
+            config=config,
+            only=only,
+            skip=skip,
+            strict=strict,
         )
-        table = load_prices(prices)
-        selected = AnalyzeConfig(
-            tier_map=load_tier_map(tier_map) if tier_map is not None else {},
-            params=load_check_params(config) if config is not None else AnalyzeConfig().params,
-            only=frozenset(only) if only else None,
-            skip=frozenset(skip or []),
-        )
-        result = analyze(store, table, selected)
     except UsageError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=EXIT_USAGE) from exc
@@ -166,12 +166,138 @@ def analyze_command(
         raise typer.Exit(code=EXIT_INPUT) from exc
     rendered = result.to_json() if json_output else result.to_text()
     typer.echo(rendered, nl=not rendered.endswith("\n"))
-    if result.summary.calls == 0:
-        typer.echo("error: no LLM calls were read", err=True)
-        raise typer.Exit(code=EXIT_INPUT)
-    if result.summary.priced_calls == 0:
-        typer.echo("error: no priced records", err=True)
-        raise typer.Exit(code=EXIT_UNPRICED)
+    _exit_if_empty(result)
+
+
+@app.command("report")
+def report_command(
+    files: Annotated[
+        list[Path],
+        typer.Argument(help="Trace files. JSONL, OTLP JSON, Langfuse export, or OpenAI usage CSV."),
+    ],
+    format_name: Annotated[
+        str | None,
+        typer.Option(
+            "--format", help="Force jsonl, otel, langfuse, or openai_csv. Default: sniff."
+        ),
+    ] = None,
+    endpoint_attr: Annotated[
+        str | None,
+        typer.Option("--endpoint-attr", help="Attribute or JSONL field used as the endpoint."),
+    ] = None,
+    prices: Annotated[
+        Path | None,
+        typer.Option("--prices", help="YAML price file merged over the bundled table."),
+    ] = None,
+    tier_map: Annotated[
+        Path | None,
+        typer.Option("--tier-map", help="YAML map of endpoint to a cheaper model. What-if only."),
+    ] = None,
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", help="YAML thresholds for the checks."),
+    ] = None,
+    only: Annotated[
+        list[str] | None,
+        typer.Option("--only", help="Run only this check. Repeat for several."),
+    ] = None,
+    skip: Annotated[
+        list[str] | None,
+        typer.Option("--skip", help="Skip this check. Repeat for several."),
+    ] = None,
+    strict: Annotated[
+        bool,
+        typer.Option("--strict", help="Fail on the first malformed line or invalid record."),
+    ] = False,
+    out: Annotated[
+        Path,
+        typer.Option("--out", help="Directory for report.md, report.html, and findings.json."),
+    ] = Path("tracetally-report"),
+    redact: Annotated[
+        bool,
+        typer.Option("--redact", help="Hash trace, user, and session ids and input paths."),
+    ] = False,
+    include_content: Annotated[
+        bool,
+        typer.Option(
+            "--include-content",
+            help="Keep truncated prompt text in the report. Ignored when --redact is set.",
+        ),
+    ] = False,
+    no_footer: Annotated[
+        bool,
+        typer.Option("--no-footer", help="Omit the one-line footer."),
+    ] = False,
+    synthetic: Annotated[
+        bool,
+        typer.Option("--synthetic", help="Label the report as synthetic data."),
+    ] = False,
+) -> None:
+    """Write report.md, report.html, and findings.json. Prints the summary and findings."""
+    if not files:
+        raise typer.BadParameter("provide at least one trace file")
+    _emit_report(
+        files,
+        format_name=format_name,
+        endpoint_attr=endpoint_attr,
+        prices=prices,
+        tier_map=tier_map,
+        config=config,
+        only=only,
+        skip=skip,
+        strict=strict,
+        out=out,
+        redact=redact,
+        include_content=include_content,
+        footer=not no_footer,
+        synthetic=synthetic,
+        demo_seed=None,
+    )
+
+
+@app.command("demo")
+def demo_command(
+    out: Annotated[
+        Path,
+        typer.Option("--out", help="Directory for the synthetic files and the report."),
+    ] = Path("tracetally-demo"),
+    seed: Annotated[
+        int,
+        typer.Option("--seed", help="Label recorded on the demo. The planted rows do not change."),
+    ] = 1,
+    no_footer: Annotated[
+        bool,
+        typer.Option("--no-footer", help="Omit the report footer line."),
+    ] = False,
+) -> None:
+    """Write the Acme Support Bot sample and a SYNTHETIC DATA report. Local files only."""
+    if seed < 0:
+        typer.echo("error: --seed must be >= 0", err=True)
+        raise typer.Exit(code=EXIT_USAGE)
+    from tracetally.demo.generator import write_demo_files
+
+    try:
+        written = write_demo_files(out, seed=seed)
+    except OSError as exc:
+        typer.echo(f"error: could not write demo files: {exc}", err=True)
+        raise typer.Exit(code=EXIT_INPUT) from exc
+    _emit_report(
+        [written["jsonl"]],
+        format_name="jsonl",
+        endpoint_attr=None,
+        prices=None,
+        tier_map=written["tiers"],
+        config=None,
+        only=None,
+        skip=None,
+        strict=False,
+        out=out,
+        redact=False,
+        include_content=False,
+        footer=not no_footer,
+        synthetic=True,
+        demo_seed=seed,
+    )
 
 
 @app.command("readers")
@@ -265,6 +391,121 @@ def prices_check(
         except PriceError as exc:
             typer.echo(f"error: {exc}", err=True)
             raise typer.Exit(code=EXIT_INPUT) from exc
+
+
+def _open_analysis(
+    files: list[Path],
+    *,
+    format_name: str | None,
+    endpoint_attr: str | None,
+    prices: Path | None,
+    tier_map: Path | None,
+    config: Path | None,
+    only: list[str] | None,
+    skip: list[str] | None,
+    strict: bool,
+    include_content: bool = False,
+) -> tuple[TraceStore, Analysis]:
+    store = load_paths(
+        list(files),
+        ReaderConfig(
+            endpoint_attr=endpoint_attr,
+            strict=strict,
+            format_name=format_name,
+            include_content=include_content,
+        ),
+    )
+    table = load_prices(prices)
+    selected = AnalyzeConfig(
+        tier_map=load_tier_map(tier_map) if tier_map is not None else {},
+        params=load_check_params(config) if config is not None else AnalyzeConfig().params,
+        only=frozenset(only) if only else None,
+        skip=frozenset(skip or []),
+    )
+    return store, analyze(store, table, selected)
+
+
+def _emit_report(
+    files: list[Path],
+    *,
+    format_name: str | None,
+    endpoint_attr: str | None,
+    prices: Path | None,
+    tier_map: Path | None,
+    config: Path | None,
+    only: list[str] | None,
+    skip: list[str] | None,
+    strict: bool,
+    out: Path,
+    redact: bool,
+    include_content: bool,
+    footer: bool,
+    synthetic: bool,
+    demo_seed: int | None,
+) -> None:
+    from tracetally.report.render import ReportOptions, write_report
+
+    if include_content and redact:
+        typer.echo(
+            "warning: --redact omits raw prompt text; --include-content was not applied",
+            err=True,
+        )
+    try:
+        store, result = _open_analysis(
+            files,
+            format_name=format_name,
+            endpoint_attr=endpoint_attr,
+            prices=prices,
+            tier_map=tier_map,
+            config=config,
+            only=only,
+            skip=skip,
+            strict=strict,
+            include_content=include_content and not redact,
+        )
+        written = write_report(
+            store,
+            result,
+            ReportOptions(
+                out=out,
+                redact=redact,
+                include_content=include_content and not redact,
+                content_requested=include_content,
+                footer=footer,
+                synthetic=synthetic,
+                demo_seed=demo_seed,
+                generated_at=datetime.now(timezone.utc),
+                redact_salt=secrets.token_hex(16) if redact else None,
+            ),
+        )
+    except UsageError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_USAGE) from exc
+    except (ReaderError, PriceError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_INPUT) from exc
+    if synthetic:
+        typer.echo("SYNTHETIC DATA")
+        if demo_seed is not None:
+            typer.echo(
+                f"Acme Support Bot demo. Seed {demo_seed}. Planted rows, not a customer export."
+            )
+    for path in (written.markdown, written.html, written.findings):
+        typer.echo(f"wrote {path}")
+    summary_text = written.analysis.summary.to_text()
+    findings_text = written.analysis.to_text()
+    typer.echo(summary_text, nl=not summary_text.endswith("\n"))
+    typer.echo(findings_text, nl=not findings_text.endswith("\n"))
+    _exit_if_empty(written.analysis)
+
+
+def _exit_if_empty(result: Analysis) -> None:
+    if result.summary.calls == 0:
+        typer.echo("error: no LLM calls were read", err=True)
+        raise typer.Exit(code=EXIT_INPUT)
+    if result.summary.priced_calls == 0:
+        typer.echo("error: no priced records", err=True)
+        raise typer.Exit(code=EXIT_UNPRICED)
 
 
 def _load_or_exit(path: Path | None) -> PriceTable:

@@ -51,6 +51,26 @@ def _collect_text(node: object, found: list[str]) -> None:
             _collect_text(child, found)
 
 
+# Kept only when a run asks for raw text. The hash still uses the full string.
+CONTENT_RETAIN_CHARS = 4000
+
+
+def retained_content(parts: Sequence[object]) -> str | None:
+    """Join prompt fragments for a report. Empty when there is no text.
+
+    The result is capped so one large prompt cannot dominate the output.
+    """
+    texts: list[str] = []
+    for part in parts:
+        _collect_text(part, texts)
+    if not texts:
+        return None
+    joined = "\n".join(texts)
+    if len(joined) <= CONTENT_RETAIN_CHARS:
+        return joined
+    return joined[:CONTENT_RETAIN_CHARS]
+
+
 def hash_content_parts(parts: Sequence[object]) -> tuple[str | None, tuple[tuple[int, str], ...]]:
     """Hash prompt fragments, including message dicts. Other types are skipped.
 

@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from tracetally.config import ReaderConfig
-from tracetally.core.hashing import content_hash, hash_content_parts
+from tracetally.core.hashing import content_hash, hash_content_parts, retained_content
 from tracetally.core.schema import Capability, LLMCall, Span, SpanKind, Status
 from tracetally.readers.base import BaseReader
 from tracetally.readers.csvutil import normalize_key, open_csv, split_header
@@ -392,7 +392,9 @@ class LangfuseReader(BaseReader):
         status = Status.ERROR if failed else Status.OK
         meta = as_object(first(row, "metadata")) or {}
         context = inherited or {}
-        digest, prefixes = hash_content_parts(_content_parts(first(row, "input")))
+        input_parts = _content_parts(first(row, "input"))
+        digest, prefixes = hash_content_parts(input_parts)
+        content = retained_content(input_parts) if cfg.include_content else None
         reported = _reported_cost(row)
         batch = _flag(first(meta, "is_batch", "batch"))
         tag_values = first(row, "tags")
@@ -431,6 +433,7 @@ class LangfuseReader(BaseReader):
             interactive=_flag(first(meta, "interactive")),
             prefix_hashes=prefixes or None,
             content_hash=digest,
+            content=content,
             tool_name=None,
             args_hash=None,
             reported_cost_usd=reported,

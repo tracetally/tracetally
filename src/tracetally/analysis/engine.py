@@ -28,9 +28,9 @@ from tracetally.pricing.table import PriceTable
 ANALYZE_SCHEMA_VERSION = 1
 
 _CONFIDENCE_RANK = {Level.HIGH: 3, Level.MED: 2, Level.LOW: 1}
-_RELIABILITY = frozenset({"latency_tail", "error_rates", "observability_gap"})
+RELIABILITY_CHECKS = frozenset({"latency_tail", "error_rates", "observability_gap"})
 
-_ANALYZE_METHOD = (
+ANALYZE_METHODOLOGY = (
     "Monthly dollars are observed dollars × (30 / window days), with a 1-day floor. "
     "Token bloat uses adoption 25/50/75%. Cache opportunity uses hit rates 50/75/90% "
     "on tokens that are not already cached. Batch candidates use 50/75/100% of calls "
@@ -53,15 +53,17 @@ class Analysis:
         return [
             item
             for item in self.findings
-            if item.check not in _RELIABILITY and not item.what_if and not _zero(item)
+            if item.check not in RELIABILITY_CHECKS and not item.what_if and not _zero(item)
         ]
 
     def reliability(self) -> list[Finding]:
-        return [item for item in self.findings if item.check in _RELIABILITY or _zero(item)]
+        return [item for item in self.findings if item.check in RELIABILITY_CHECKS or _zero(item)]
 
     def to_dict(self) -> dict[str, object]:
         savings = [
-            item for item in self.findings if not item.what_if and item.check not in _RELIABILITY
+            item
+            for item in self.findings
+            if not item.what_if and item.check not in RELIABILITY_CHECKS
         ]
         what_ifs = [item for item in self.findings if item.what_if]
         return {
@@ -70,7 +72,7 @@ class Analysis:
             "price_table_id": self.summary.price_table_id,
             "price_table_retrieved_on": self.summary.price_table_retrieved_on,
             "currency": self.summary.currency,
-            "methodology": METHODOLOGY + " " + _ANALYZE_METHOD,
+            "methodology": METHODOLOGY + " " + ANALYZE_METHODOLOGY,
             "monthly": {
                 "factor": _money(self.monthly_factor),
                 "window_start": _iso(self.summary.time_start),
@@ -116,7 +118,11 @@ class Analysis:
         window = f"{_iso(summary.time_start) or '-'} to {_iso(summary.time_end) or '-'}"
         console.print(f"window {window}")
         savings_sum = _range_sum(
-            [item for item in self.findings if not item.what_if and item.check not in _RELIABILITY]
+            [
+                item
+                for item in self.findings
+                if not item.what_if and item.check not in RELIABILITY_CHECKS
+            ]
         )
         what_if_sum = _range_sum([item for item in self.findings if item.what_if])
         console.print(
@@ -152,7 +158,7 @@ class Analysis:
                 console.print(f"- {warning}")
             console.print()
         console.print(METHODOLOGY)
-        console.print(_ANALYZE_METHOD)
+        console.print(ANALYZE_METHODOLOGY)
         console.print("Offline. No network calls. No telemetry.")
         return buffer.getvalue()
 
@@ -219,7 +225,7 @@ def _skip_reason(
 
 
 def _rank(item: Finding) -> tuple[int, Decimal, int, str]:
-    section = 1 if item.check in _RELIABILITY or _zero(item) else 0
+    section = 1 if item.check in RELIABILITY_CHECKS or _zero(item) else 0
     return (
         section,
         -item.est_monthly_usd.mid,
