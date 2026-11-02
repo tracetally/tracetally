@@ -23,6 +23,7 @@ class ReaderConfig:
     endpoint_attr: str | None = None
     strict: bool = False
     format_name: str | None = None
+    include_content: bool = False
 
 
 @dataclass(frozen=True)

@@ -5,7 +5,8 @@ OpenAI documents the export as CSV (activity or cost) and documents the Usage
 and Costs API fields. It does not publish one header row for the dashboard
 file. This reader accepts those API names and a few aliases
 (``n_context_tokens_total``, ``n_generated_tokens_total``, ``date``,
-``amount``). A column it does not know is ignored.
+``amount``, ``Cached Input Tokens``, ``Cost ($)``). A column it does not know
+is ignored.
 
 Rows are aggregated: ``request_count`` is the request total, not 1. There is
 no latency, trace tree, prompt, or error status, so the reader declares none
@@ -58,6 +59,7 @@ _COLUMN_MAP = {
     "n_generated_tokens_total": "output_tokens",
     "completion_tokens": "output_tokens",
     "input_cached_tokens": "cached_input_tokens",
+    "cached_input_tokens": "cached_input_tokens",
     "cached_tokens": "cached_input_tokens",
     "n_cached_context_tokens": "cached_input_tokens",
     "input_uncached_tokens": "input_uncached_tokens",

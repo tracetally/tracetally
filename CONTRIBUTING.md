@@ -30,6 +30,17 @@ needs `source_url` and `retrieved_on`. Do not guess a price for a model that
 is not on the publisher's page. Unknown models stay unpriced at runtime.
 Updating the table is a pull request, never a network call from the CLI.
 
+## Reports
+
+`report.html` is one file. Do not add a script, a web font, an image, or a
+stylesheet link. Inline SVG is drawn in `src/tracetally/report/svg.py`. The
+only remote URLs are the two plain anchors in `tracetally.report.links`.
+`tests/report/test_html_offline.py` fails the build if a report would load
+anything else.
+
+`--include-content` is the only path that may copy prompt text into the
+report, and it is capped. The default readers hash that text and drop it.
+
 ## Readers
 
 Built-in readers register on the `tracetally.readers` entry-point group.

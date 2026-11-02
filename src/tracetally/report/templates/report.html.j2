@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tracetally report</title>
+<style>{{ style }}</style>
+</head>
+<body>
+<main>
+{% if synthetic %}
+<section class="banner">
+  <strong>SYNTHETIC DATA</strong>
+  <p>Acme Support Bot is a planted sample, not a customer export.{% if demo_seed is not none %} Seed {{ demo_seed }}. The seed labels this run. The rows are fixed, not a random redraw.{% endif %}</p>
+</section>
+{% endif %}
+
+<header>
+  <p class="meta">tracetally {{ version }} · offline report · no network calls · no telemetry</p>
+  <h1>LLM cost and reliability audit</h1>
+  <p class="muted">Generated {{ generated_at }}. Price table {{ price_table_id }}, retrieved {{ price_retrieved_on }}. {{ currency }}.</p>
+</header>
+
+<section class="summary" id="summary">
+  <h2>Executive summary</h2>
+  {% if cost_only %}<p class="note">Cost-only export. Trace-level checks were skipped. The observability gap lists the fields to start logging.</p>{% endif %}
+  <dl>
+    <dt>Observed spend</dt><dd>{{ observed_cost }} {{ currency }}</dd>
+    <dt>Est. monthly spend</dt><dd>{{ monthly_spend }} {{ currency }}</dd>
+    <dt>Window</dt><dd>{{ window_start }} to {{ window_end }}</dd>
+    <dt>Calls</dt><dd>{{ calls }} priced {{ priced_calls }}/{{ calls }}{% if unpriced_calls %} · {{ unpriced_calls }} unpriced{% endif %}</dd>
+    <dt>Est. monthly savings</dt><dd>{{ savings_low }} / {{ savings_mid }} / {{ savings_high }}</dd>
+    <dt>What-if (not in savings)</dt><dd>{{ what_if_low }} / {{ what_if_mid }} / {{ what_if_high }}</dd>
+  </dl>
+  <h3>Top findings</h3>
+  {% if top_findings %}
+  <ol class="ranked">
+    {% for card in top_findings %}
+    <li>{{ card.title }}{% if card.what_if %} <span class="badge">what-if</span>{% endif %} — {{ card.mid }} {{ currency }}/mo mid</li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p>No dollar findings.</p>
+  {% endif %}
+</section>
+
+<section id="charts">
+  <h2>Charts</h2>
+  <div class="charts">
+    {{ charts.cost_by_model }}
+    {{ charts.cost_by_endpoint }}
+    {{ charts.latency }}
+  </div>
+  <p class="meta">Bars are list-price cost. Dots are latency in milliseconds. Groups under 20 durations are omitted from the latency chart.</p>
+</section>
+
+<section id="findings">
+  <h2>Findings</h2>
+  <p class="muted">Ranked by estimated monthly dollars (mid), then confidence. Ranges are low / mid / high. What-if is price only.</p>
+  {% if findings %}
+  {% for card in findings %}
+  <article class="finding{% if card.what_if %} what-if{% endif %}">
+    <h3>{{ card.rank }}. {{ card.title }}{% if card.what_if %} <span class="badge">what-if</span>{% endif %}</h3>
+    <p class="meta">{{ card.check }} · {{ card.id }} · severity {{ card.severity }}</p>
+    {% if card.has_dollars %}
+    <p class="facts"><span>Low {{ card.low }}</span><span>Mid {{ card.mid }}</span><span>High {{ card.high }}</span><span>{{ currency }}/mo</span></p>
+    {% else %}
+    <p>No dollar estimate.</p>
+    {% endif %}
+    <p class="facts"><span>Effort {{ card.effort }}</span><span>Quality risk {{ card.quality_risk }}</span><span>Confidence {{ card.confidence }}</span></p>
+    <p>{{ card.recommendation }}</p>
+    {% if card.caveats %}<ul>{% for caveat in card.caveats %}<li>{{ caveat }}</li>{% endfor %}</ul>{% endif %}
+    {% for row in card.evidence %}
+    <p class="meta">{{ row.endpoint }} · {{ row.count }} calls · traces {{ row.traces }}</p>
+    {% if row.detail %}<p>{{ row.detail }}</p>{% endif %}
+    {% endfor %}
+    {% for excerpt in card.excerpts %}
+    <p class="meta">Prompt excerpt · {{ excerpt.trace_id }}</p>
+    <pre>{{ excerpt.text }}</pre>
+    {% endfor %}
+  </article>
+  {% endfor %}
+  {% else %}
+  <p>No dollar findings.</p>
+  {% endif %}
+</section>
+
+<section id="reliability">
+  <h2>Reliability and coverage</h2>
+  {% if reliability %}
+  {% for card in reliability %}
+  <article class="finding reliability">
+    <h3>{{ card.title }}</h3>
+    <p class="meta">{{ card.check }} · severity {{ card.severity }} · effort {{ card.effort }} · confidence {{ card.confidence }}</p>
+    <p>{{ card.recommendation }}</p>
+    {% if card.caveats %}<ul>{% for caveat in card.caveats %}<li>{{ caveat }}</li>{% endfor %}</ul>{% endif %}
+    {% for row in card.evidence %}
+    <p class="meta">{{ row.endpoint }} · {{ row.count }} calls · traces {{ row.traces }}</p>
+    {% if row.detail %}<p>{{ row.detail }}</p>{% endif %}
+    {% endfor %}
+  </article>
+  {% endfor %}
+  {% else %}
+  <p>No reliability findings.</p>
+  {% endif %}
+</section>
+
+<section id="tables">
+  <h2>Summary tables</h2>
+  <p>{{ error_text }}</p>
+  <h3>By model</h3>
+  <div class="scroll"><table>
+    <thead>
+      <tr>
+        <th>Provider</th><th>Model</th><th class="num">Requests</th><th class="num">Input</th>
+        <th class="num">Cached</th><th class="num">Output</th><th class="num">Cost</th>
+        <th class="num">n</th><th class="num">p50</th><th class="num">p95</th><th class="num">p99</th>
+        <th class="num">429</th><th class="num">5xx</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in model_rows %}
+      <tr>
+        <td>{{ row.provider }}</td><td>{{ row.model }}</td>
+        <td class="num">{{ row.requests }}</td><td class="num">{{ row.input_tokens }}</td>
+        <td class="num">{{ row.cached_input_tokens }}</td><td class="num">{{ row.output_tokens }}</td>
+        <td class="num">{{ row.cost }}</td><td class="num">{{ row.n }}</td>
+        <td class="num">{{ row.p50 }}</td><td class="num">{{ row.p95 }}</td><td class="num">{{ row.p99 }}</td>
+        <td class="num">{{ row.n_429 }}</td><td class="num">{{ row.n_5xx }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  <h3>By endpoint and model</h3>
+  <div class="scroll"><table>
+    <thead>
+      <tr>
+        <th>Endpoint</th><th>Provider</th><th>Model</th><th class="num">Requests</th>
+        <th class="num">Input</th><th class="num">Output</th><th class="num">Cost</th>
+        <th class="num">n</th><th class="num">p50</th><th class="num">p95</th><th class="num">p99</th>
+        <th class="num">429</th><th class="num">5xx</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in endpoint_rows %}
+      <tr>
+        <td>{{ row.endpoint }}</td><td>{{ row.provider }}</td><td>{{ row.model }}</td>
+        <td class="num">{{ row.requests }}</td><td class="num">{{ row.input_tokens }}</td>
+        <td class="num">{{ row.output_tokens }}</td><td class="num">{{ row.cost }}</td>
+        <td class="num">{{ row.n }}</td><td class="num">{{ row.p50 }}</td>
+        <td class="num">{{ row.p95 }}</td><td class="num">{{ row.p99 }}</td>
+        <td class="num">{{ row.n_429 }}</td><td class="num">{{ row.n_5xx }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section id="skipped">
+  <h2>Skipped checks</h2>
+  {% if skipped %}
+  <ul>{% for item in skipped %}<li><strong>{{ item.check }}</strong> — {{ item.reason }}</li>{% endfor %}</ul>
+  {% else %}
+  <p>Every check ran.</p>
+  {% endif %}
+</section>
+
+{% if warnings %}
+<section id="warnings">
+  <h2>Warnings</h2>
+  <ul>{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section id="methodology">
+  <h2>Methodology</h2>
+  {% for paragraph in methodology %}<p>{{ paragraph }}</p>{% endfor %}
+  {% for caveat in monthly_caveats %}<p>{{ caveat }}</p>{% endfor %}
+  <p>Routing changes and savings ranges are estimates. <a href="{{ evals_url }}">validate with evals</a> before treating a cheaper model as equivalent. What-if dollars are not included in the savings total.</p>
+  <h3>Inputs</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Path</th><th>SHA-256</th><th class="num">Records</th><th class="num">Spans</th><th class="num">Skipped</th></tr></thead>
+    <tbody>
+      {% for item in inputs %}
+      <tr>
+        <td class="wrap">{{ item.path }}</td><td class="wrap">{{ item.sha256 }}</td>
+        <td class="num">{{ item.records }}</td><td class="num">{{ item.spans }}</td><td class="num">{{ item.skipped }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="meta">findings.json schema_version {{ schema_version }}.</p>
+</section>
+
+{% if footer %}
+<footer>
+  <p>Generated by tracetally {{ version }} (open source). Want a human-reviewed audit of your production traces? <a href="{{ project_url }}">Project page</a>.</p>
+</footer>
+{% endif %}
+</main>
+</body>
+</html>

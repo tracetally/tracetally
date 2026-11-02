@@ -4,17 +4,17 @@ Offline cost and reliability audit for LLM traces you already exported.
 
 Your LLM bill tells you the total. tracetally tells you why.
 
-This tree is the W3 milestone (`0.1.0.dev0`): it reads JSONL, OTLP/JSON,
-Langfuse, and OpenAI usage CSV exports, prints a summary, and ranks savings
-checks. It does not yet write the audit report. A cost-only file says which
-checks it cannot run, and why.
+This tree is the W4 milestone (`0.1.0.dev0`): it reads JSONL, OTLP/JSON,
+Langfuse, and OpenAI usage CSV exports, ranks savings and reliability
+findings, and writes `report.md`, `report.html`, and `findings.json`.
+A cost-only file says which checks it cannot run, and why.
 
 ## What it is not
 
 tracetally is not a proxy, gateway, router, SDK, or server. It does not sit
 in the request path, hold provider API keys, send telemetry, or fetch prices.
-The only I/O is the files you name and the summary it prints. If the machine
-has no network, the summary still runs.
+The only I/O is the files you name and the directory you pass to `--out`.
+If the machine has no network, every command still runs.
 
 ## Install
 
@@ -24,7 +24,33 @@ Python 3.10 or newer.
 python -m pip install -e ".[dev]"
 ```
 
-The published install (`pipx install tracetally`) lands with the 0.1.0 release.
+The published install (`pipx install tracetally`, `uv tool install tracetally`,
+or `pip install tracetally`) lands with the 0.1.0 release. The package does
+not call the network at runtime.
+
+## Try it
+
+```bash
+tracetally demo
+```
+
+That writes a planted Acme Support Bot sample and a report under
+`./tracetally-demo/`. The terminal and the report header say **SYNTHETIC DATA**.
+The rows are not production traces and they are not a customer result.
+`--seed` labels the run. It does not redraw the rows, so the planted dollar
+amounts stay fixed.
+
+Open `tracetally-demo/report.html` in a browser. The file is self-contained:
+inline CSS, inline SVG, no JavaScript. It does not load images, fonts, or
+scripts. The only `https` links are plain anchors (the project page and
+"validate with evals"). A browser does not fetch them until you click.
+
+```bash
+tracetally summary examples/synthetic_otel.json
+tracetally analyze examples/synthetic.jsonl --tier-map examples/tiers.example.yaml
+tracetally report examples/synthetic.jsonl --tier-map examples/tiers.example.yaml
+tracetally prices
+```
 
 ## Summary
 
@@ -106,11 +132,87 @@ measured). Analyze skips every check that needs those fields and says the CSV
 is cost-only. Langfuse declares the trace capabilities, so those checks run.
 Mixing a CSV with a trace file uses the intersection, which is cost-only.
 
-Other commands: `tracetally readers`, `tracetally version`, `tracetally prices`,
-`tracetally prices list`, `tracetally prices check`.
+## Report
 
-Exit codes: `0` ok, `2` usage, `3` input or price-file error, `4` records were
-read but none could be priced.
+```bash
+tracetally report examples/synthetic.jsonl --tier-map examples/tiers.example.yaml
+tracetally report examples/synthetic_openai_usage.csv --out ./csv-report --no-footer
+tracetally report examples/synthetic.jsonl --redact
+tracetally report examples/synthetic.jsonl --include-content
+```
+
+`report` runs the summary and the checks, prints both, and writes three files
+in `--out` (default `./tracetally-report/`):
+
+| File | What it is |
+|---|---|
+| `report.md` | The same audit in Markdown, for a diff or a ticket. |
+| `report.html` | One file. Inline CSS and inline SVG. No JavaScript. |
+| `findings.json` | `schema_version` 1. The public machine-readable contract. |
+
+The HTML report has an executive summary (spend, top findings, low/mid/high
+savings), ranked finding cards (evidence, $/month, effort, quality risk,
+confidence, caveats), a reliability section, summary tables, skipped checks,
+and a methodology section that names the price table and the date it was
+retrieved. What-if rows are labelled and are not added to the savings total.
+The footer is one line and comes off with `--no-footer`.
+
+`findings.json` is a `RunResult`. Top-level `skipped_checks` is what this run
+skipped, including a missing `--tier-map`, `--only`, and `--skip`. The embedded
+`summary` object is the summary document, whose own skip list is capabilities
+only. Dollar totals use the same compact decimals as `analyze --json`.
+`generated_at` is the only clock in the file.
+
+`--redact` hashes trace ids, user ids, session ids, and input paths with a
+per-run salt that is not stored. The same id maps to the same token inside one
+report and to a different token next time. The file SHA-256 is kept so you can
+match the run to a file you still hold. `--include-content` keeps at most 4000
+characters of prompt text per call and prints up to two 500-character excerpts
+on each finding. It is not a full prompt export. `--redact` wins: the text is
+not kept, and the command says so.
+
+`--synthetic` adds the SYNTHETIC DATA banner. `tracetally demo` sets it.
+
+Exit codes for every command: `0` ok, `2` usage, `3` input or price-file error,
+`4` records were read but none could be priced. `report` still writes the
+files when the exit code is 4.
+
+## Demo
+
+```bash
+tracetally demo --out ./tracetally-demo --seed 1
+```
+
+Writes `synthetic.jsonl`, `synthetic_otel.json`, `tiers.yaml`,
+`ground_truth.json`, and the three report files. The report is built from the
+JSONL file plus the tier map, so the summary and every check, including the
+model-swap what-if, all run. `examples/ground_truth.json` lists the planted dollar ranges.
+`support.control` is the clean endpoint.
+
+## Other commands
+
+`tracetally prices`, `tracetally prices list`, and `tracetally prices check`
+show the loaded price table. `tracetally readers` lists adapters.
+`tracetally version` prints the version. Details of the price file are below.
+
+## Getting a file into each reader
+
+tracetally only reads a file you already have. It does not connect to a
+collector, a Langfuse server, or the OpenAI API.
+
+- **OTLP JSON.** Export OTLP/JSON from your app or from a collector file
+  exporter (one request per line, or one `ExportTraceServiceRequest` document)
+  and pass that path. `tracetally report traces.json --format otel`.
+- **JSONL.** Write one object per line with the fields below, or pretty-print
+  a single object or a JSON array. `tracetally report calls.jsonl --format jsonl`.
+- **Langfuse.** Export traces or observations as JSON or CSV from the Langfuse
+  UI, then pass the file. `tracetally report observations.json --format langfuse`.
+- **OpenAI usage CSV.** Download the usage or costs CSV from the API usage
+  dashboard, then pass the file. The run is cost-only.
+  `tracetally report usage.csv --format openai_csv`.
+
+Without `--format`, the highest `sniff()` score above 0.5 wins. A tie is an
+error that names both readers.
 
 ## JSONL fields
 
@@ -184,7 +286,8 @@ on the first bad record.
 Aggregated usage or cost rows. There is no published dashboard header, so the
 reader accepts the Usage and Costs API names plus aliases (`date`,
 `snapshot_id`, `n_context_tokens_total`, `n_generated_tokens_total`, `amount`,
-`amount_value`). `request_count` is the row's request total. `input_tokens`
+`amount_value`, `Cached Input Tokens`, `Cost ($)`). `request_count` is the
+row's request total. `input_tokens`
 includes cached tokens. Audio token columns are ignored, not folded into the
 text counts. `amount_cents` is rejected rather than converted. A non-USD
 currency is skipped. A cost with no token counts is kept, with tokens recorded
@@ -245,6 +348,40 @@ publisher pages on 2026-10-22:
 List prices and the batch-times-cache rule were retrieved 2026-10-22. No rate
 in the file was invented to fill a blank.
 
+## What is read
+
+tracetally reads only the paths you pass:
+
+- the trace files on the command line
+- an optional `--prices` YAML file, merged over the bundled table
+- an optional `--tier-map` YAML file
+- an optional `--config` YAML file of check thresholds
+
+Prompt and response fields are read in order to hash them (BLAKE2b, 16-byte
+digest) and are then dropped. Prefix hashes use a chars/4 estimate only to
+pick a bucket. Dollar math uses the reported token counts. Raw prompt text is
+not printed, not written, and not sent anywhere unless you pass
+`--include-content`. `--redact` also hashes identifiers in the report, as
+described above.
+
+The command writes to the terminal and, for `report` and `demo`, to `--out`.
+There is no cache outside that directory, no update check, and no telemetry.
+
+## Offline guarantee
+
+Three checks enforce the rule, and they run in CI:
+
+- the test suite starts with sockets disabled (`pytest --disable-socket`)
+- ruff's `banned-api` rule rejects imports of `socket`, `urllib.request`,
+  `http.client`, `requests`, `httpx`, `aiohttp`, and `subprocess` in `src/`
+- `scripts/check_no_http_clients.py` fails if the installed runtime dependency
+  tree contains an HTTP client
+
+A separate test parses `report.html` and fails if it contains a script, an
+image, a stylesheet link, or any `src` / `href` that would load a remote
+resource. The SVG `xmlns` is a namespace, not a fetch. The two allowed `https`
+anchors are the project page and the "validate with evals" link.
+
 ## Development
 
 ```bash
@@ -256,6 +393,18 @@ python -m pytest --disable-socket
 The socket block, the ruff import ban, and `scripts/check_no_http_clients.py`
 are the offline guarantee. CI runs ruff, mypy, and pytest on Python 3.10–3.13
 across Linux, macOS, and Windows.
+
+## Validate with evals
+
+Savings ranges and model-swap rows are price estimates. They do not say that a
+cheaper model will keep answer quality. Check that with your own evals before
+you change a route. The report says this in the methodology section.
+
+## Author
+
+Built by Arockia. If you want this run on your production traces, with a
+written, prioritised fix plan, I do LLM cost and reliability audits. The work
+stays read-only: you export the files, and nothing is routed through a gateway.
 
 ## License
 

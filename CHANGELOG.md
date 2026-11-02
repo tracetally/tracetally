@@ -2,7 +2,21 @@
 
 ## 0.1.0.dev0
 
-W3 analysis checks, on top of the W2 readers. Not a release.
+W4 reports and demo, on top of the W3 checks. Not a release.
+
+- `tracetally report` writes `report.md`, a single-file `report.html` (inline
+  CSS, inline SVG, no JavaScript), and `findings.json` (`schema_version` 1).
+- The report ranks findings with low/mid/high monthly dollars, effort, quality
+  risk, confidence, and evidence. What-if rows stay out of the savings total.
+- `--redact` hashes trace, user, and session ids and input paths with a per-run
+  salt. `--include-content` keeps truncated prompt excerpts. `--redact` wins.
+  `--no-footer` drops the one-line footer. `--synthetic` labels the header.
+- `tracetally demo` writes the planted Acme Support Bot files and the report.
+  The seed labels the run and does not redraw the rows.
+- OpenAI usage CSV accepts the dashboard header `Cached Input Tokens`. Those
+  tokens are priced at the cached-input rate instead of being dropped.
+
+W3 analysis checks, still in this tree. Not a release.
 
 - `tracetally analyze` ranks token bloat, cache opportunity, batch candidates,
   retry waste, agent loops, and model-swap what-if. Terminal and `--json`.

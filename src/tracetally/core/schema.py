@@ -84,6 +84,8 @@ class LLMCall(BaseModel):
     interactive: bool | None = None
     prefix_hashes: tuple[tuple[int, str], ...] | None = None
     content_hash: str | None = None
+    # Prompt text. Readers leave this empty unless the run asks to keep it.
+    content: str | None = None
     tool_name: str | None = None
     args_hash: str | None = None
     reported_cost_usd: Decimal | None = None
@@ -149,22 +151,39 @@ class InputDigest(BaseModel):
     sha256: str
     records: int
     skipped: int = 0
+    spans: int = 0
 
 
 class RunResult(BaseModel):
-    """Serialised form of a full run. ``schema_version`` is a public contract.
+    """Serialised form of a full run. ``findings.json`` is this model.
 
-    W1 summary JSON is a separate, smaller document (``summary_schema_version``).
-    ``findings.json`` will use this model when reports land.
+    ``schema_version`` is a public contract. Summary JSON from ``tracetally
+    summary --json`` stays a separate document (``summary_schema_version``).
+    ``skipped_checks`` is the analyze run (capabilities, ``--only``, ``--skip``,
+    and a missing tier map). ``summary`` embeds that command's own document,
+    including its capability-only skip list.
     """
 
     model_config = ConfigDict(extra="ignore")
 
     schema_version: int = 1
     tracetally_version: str
+    generated_at: str = ""
+    synthetic: bool = False
+    demo_seed: int | None = None
+    redacted: bool = False
+    include_content: bool = False
+    show_footer: bool = True
+    price_table_id: str
+    price_table_retrieved_on: str
+    currency: str = "USD"
+    methodology: str = ""
+    monthly_factor: str = "1"
+    monthly_caveats: list[str] = Field(default_factory=list)
+    totals: dict[str, Any] = Field(default_factory=dict)
     summary: dict[str, Any] = Field(default_factory=dict)
     findings: list[Finding] = Field(default_factory=list)
     skipped_checks: list[SkippedCheck] = Field(default_factory=list)
     inputs: list[InputDigest] = Field(default_factory=list)
-    price_table_id: str
-    price_table_retrieved_on: str
+    warnings: list[str] = Field(default_factory=list)
+    content_excerpts: list[dict[str, str]] = Field(default_factory=list)

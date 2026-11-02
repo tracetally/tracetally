@@ -109,6 +109,33 @@ def test_strict_unknown_header_and_cents(tmp_path: Path) -> None:
         load_paths([wrong], ReaderConfig(format_name="openai_csv", strict=True))
 
 
+def test_dashboard_cached_input_tokens_header(tmp_path: Path) -> None:
+    """Usage-dashboard export spells the cache column 'Cached Input Tokens'."""
+    path = tmp_path / "dashboard.csv"
+    path.write_text(
+        "Date,Organization ID,Project ID,Model,Requests,Input Tokens,Output Tokens,"
+        "Cached Input Tokens,Cost ($)\n"
+        "2026-11-01,org-prod123,proj-default,gpt-4o,1420,1245000,680000,310000,10.15\n",
+        encoding="utf-8",
+    )
+    assert select_reader(path, None) is OpenAICsvReader
+    store = load_paths([path], ReaderConfig())
+    assert len(store) == 1
+    assert store.inputs[0].skipped == 0
+    assert int(store.input_tokens[0]) == 1_245_000
+    assert int(store.cached_input_tokens[0]) == 310_000
+    assert int(store.output_tokens[0]) == 680_000
+    assert int(store.request_count[0]) == 1420
+    assert store.endpoint[0] == "proj-default"
+    assert store.reported_cost_usd[0] == Decimal("10.15")
+    warnings = " ".join(store.warnings)
+    assert "ignored extra columns" not in warnings
+    assert "Cached Input Tokens -> cached_input_tokens" in warnings
+    result = summarize(store, load_bundled())
+    # Uncached 935000 * $2.50 + cached 310000 * $1.25 + output 680000 * $10, per 1M.
+    assert result.cost_usd == Decimal("9.525")
+
+
 def test_audio_tokens_are_not_added(tmp_path: Path) -> None:
     path = tmp_path / "audio.csv"
     path.write_text(

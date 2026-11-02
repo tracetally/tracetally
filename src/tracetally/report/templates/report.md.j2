@@ -1,0 +1,169 @@
+{% if synthetic %}
+# SYNTHETIC DATA
+
+Acme Support Bot is a planted sample, not a customer export.{% if demo_seed is not none %} Seed {{ demo_seed }}. The seed labels this run. The rows are fixed, not a random redraw.{% endif %}
+
+{% endif %}
+# LLM cost and reliability audit
+
+tracetally {{ version }} · offline report · no network calls · no telemetry
+
+Generated {{ generated_at }}. Price table {{ price_table_id }}, retrieved {{ price_retrieved_on }}. {{ currency }}.
+
+## Executive summary
+
+{% if cost_only %}
+Cost-only export. Trace-level checks were skipped. The observability gap lists the fields to start logging.
+
+{% endif %}
+- Observed spend: {{ observed_cost }} {{ currency }}
+- Est. monthly spend: {{ monthly_spend }} {{ currency }}
+- Window: {{ window_start }} to {{ window_end }}
+- Calls: {{ calls }} priced {{ priced_calls }}/{{ calls }}{% if unpriced_calls %} · {{ unpriced_calls }} unpriced{% endif %}
+- Est. monthly savings (low / mid / high): {{ savings_low }} / {{ savings_mid }} / {{ savings_high }}
+- What-if, not in the savings total: {{ what_if_low }} / {{ what_if_mid }} / {{ what_if_high }}
+
+### Top findings
+
+{% if top_findings %}
+{% for card in top_findings %}
+{{ loop.index }}. {{ card.title }}{% if card.what_if %} (what-if){% endif %} — {{ card.mid }} {{ currency }}/mo mid
+{% endfor %}
+{% else %}
+No dollar findings.
+{% endif %}
+
+Charts are in `report.html` (inline SVG, no JavaScript).
+
+## Findings
+
+Ranked by estimated monthly dollars (mid), then confidence. Ranges are low / mid / high. What-if is price only.
+
+{% if findings %}
+{% for card in findings %}
+### {{ card.rank }}. {{ card.title }}{% if card.what_if %} (what-if){% endif %}
+
+`{{ card.check }}` · `{{ card.id }}` · severity {{ card.severity }}
+
+{% if card.has_dollars %}
+Low {{ card.low }} · Mid {{ card.mid }} · High {{ card.high }} {{ currency }}/mo
+{% else %}
+No dollar estimate.
+{% endif %}
+
+Effort {{ card.effort }} · Quality risk {{ card.quality_risk }} · Confidence {{ card.confidence }}
+
+{{ card.recommendation }}
+
+{% for caveat in card.caveats %}
+- Caveat: {{ caveat }}
+{% endfor %}
+{% for row in card.evidence %}
+- Evidence: {{ row.endpoint }} · {{ row.count }} calls · traces {{ row.traces }}
+{% if row.detail %}
+  {{ row.detail }}
+{% endif %}
+{% endfor %}
+{% for excerpt in card.excerpts %}
+Prompt excerpt ({{ excerpt.trace_id }}):
+
+```
+{{ excerpt.text }}
+```
+{% endfor %}
+
+{% endfor %}
+{% else %}
+No dollar findings.
+{% endif %}
+
+## Reliability and coverage
+
+{% if reliability %}
+{% for card in reliability %}
+### {{ card.title }}
+
+`{{ card.check }}` · severity {{ card.severity }} · effort {{ card.effort }} · confidence {{ card.confidence }}
+
+{{ card.recommendation }}
+
+{% for caveat in card.caveats %}
+- Caveat: {{ caveat }}
+{% endfor %}
+{% for row in card.evidence %}
+- Evidence: {{ row.endpoint }} · {{ row.count }} calls · traces {{ row.traces }}
+{% if row.detail %}
+  {{ row.detail }}
+{% endif %}
+{% endfor %}
+
+{% endfor %}
+{% else %}
+No reliability findings.
+{% endif %}
+
+## Summary tables
+
+{{ error_text }}
+
+### By model
+
+| Provider | Model | Requests | Input | Cached | Output | Cost | n | p50 | p95 | p99 | 429 | 5xx |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+{% for row in model_rows %}
+| {{ row.provider | md_cell }} | {{ row.model | md_cell }} | {{ row.requests }} | {{ row.input_tokens }} | {{ row.cached_input_tokens }} | {{ row.output_tokens }} | {{ row.cost }} | {{ row.n }} | {{ row.p50 }} | {{ row.p95 }} | {{ row.p99 }} | {{ row.n_429 }} | {{ row.n_5xx }} |
+{% endfor %}
+
+### By endpoint and model
+
+| Endpoint | Provider | Model | Requests | Input | Output | Cost | n | p50 | p95 | p99 | 429 | 5xx |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+{% for row in endpoint_rows %}
+| {{ row.endpoint | md_cell }} | {{ row.provider | md_cell }} | {{ row.model | md_cell }} | {{ row.requests }} | {{ row.input_tokens }} | {{ row.output_tokens }} | {{ row.cost }} | {{ row.n }} | {{ row.p50 }} | {{ row.p95 }} | {{ row.p99 }} | {{ row.n_429 }} | {{ row.n_5xx }} |
+{% endfor %}
+
+## Skipped checks
+
+{% if skipped %}
+{% for item in skipped %}
+- **{{ item.check }}** — {{ item.reason }}
+{% endfor %}
+{% else %}
+Every check ran.
+{% endif %}
+
+{% if warnings %}
+## Warnings
+
+{% for warning in warnings %}
+- {{ warning }}
+{% endfor %}
+{% endif %}
+
+## Methodology
+
+{% for paragraph in methodology %}
+{{ paragraph }}
+
+{% endfor %}
+{% for caveat in monthly_caveats %}
+{{ caveat }}
+
+{% endfor %}
+Routing changes and savings ranges are estimates. [validate with evals]({{ evals_url }}) before treating a cheaper model as equivalent. What-if dollars are not included in the savings total.
+
+### Inputs
+
+| Path | SHA-256 | Records | Spans | Skipped |
+| --- | --- | ---: | ---: | ---: |
+{% for item in inputs %}
+| {{ item.path | md_cell }} | {{ item.sha256 }} | {{ item.records }} | {{ item.spans }} | {{ item.skipped }} |
+{% endfor %}
+
+findings.json schema_version {{ schema_version }}.
+
+{% if footer %}
+---
+
+Generated by tracetally {{ version }} (open source). Want a human-reviewed audit of your production traces? [Project page]({{ project_url }}).
+{% endif %}

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from tracetally.config import ReaderConfig
-from tracetally.core.hashing import hash_content_parts
+from tracetally.core.hashing import hash_content_parts, retained_content
 from tracetally.core.schema import Capability, LLMCall, Span, SpanKind
 from tracetally.readers.base import BaseReader
 from tracetally.readers.jsonutil import loads
@@ -147,6 +147,7 @@ def _call_from_object(obj: dict[str, Any], *, where: str, cfg: ReaderConfig) -> 
         if content_key(str(key)):
             content_parts.extend(text_fragments(obj.pop(key)))
     digest, prefixes = hash_content_parts(content_parts)
+    content = retained_content(content_parts) if cfg.include_content else None
 
     model = _required_str(obj, "model")
     start = parse_time(obj.get("start_time"))
@@ -196,6 +197,7 @@ def _call_from_object(obj: dict[str, Any], *, where: str, cfg: ReaderConfig) -> 
         interactive=interactive,
         prefix_hashes=prefixes or None,
         content_hash=digest,
+        content=content,
         tool_name=_optional_str(obj.get("tool_name")),
         args_hash=_optional_str(obj.get("args_hash")),
         reported_cost_usd=reported,

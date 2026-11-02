@@ -208,6 +208,10 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
+# Local report output
+tracetally-demo/
+tracetally-report/
+
 # PyPI configuration file
 .pypirc
 

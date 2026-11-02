@@ -52,6 +52,16 @@ def token_cost(tokens: int, price_per_million: Decimal) -> Decimal:
     return Decimal(tokens) * price_per_million / _PER_MILLION
 
 
+def money_text(amount: Decimal | None) -> str | None:
+    """Compact decimal for JSON. ``None`` stays ``None``."""
+    if amount is None:
+        return None
+    text = format(amount.quantize(Decimal("0.000000000001")), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
 def format_usd(amount: Decimal | None) -> str:
     """Fixed 6 decimal places, or '-' when the amount is unknown."""
     if amount is None:
