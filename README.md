@@ -286,7 +286,8 @@ on the first bad record.
 Aggregated usage or cost rows. There is no published dashboard header, so the
 reader accepts the Usage and Costs API names plus aliases (`date`,
 `snapshot_id`, `n_context_tokens_total`, `n_generated_tokens_total`, `amount`,
-`amount_value`). `request_count` is the row's request total. `input_tokens`
+`amount_value`, `Cached Input Tokens`, `Cost ($)`). `request_count` is the
+row's request total. `input_tokens`
 includes cached tokens. Audio token columns are ignored, not folded into the
 text counts. `amount_cents` is rejected rather than converted. A non-USD
 currency is skipped. A cost with no token counts is kept, with tokens recorded

@@ -13,6 +13,8 @@ W4 reports and demo, on top of the W3 checks. Not a release.
   `--no-footer` drops the one-line footer. `--synthetic` labels the header.
 - `tracetally demo` writes the planted Acme Support Bot files and the report.
   The seed labels the run and does not redraw the rows.
+- OpenAI usage CSV accepts the dashboard header `Cached Input Tokens`. Those
+  tokens are priced at the cached-input rate instead of being dropped.
 
 W3 analysis checks, still in this tree. Not a release.
 
