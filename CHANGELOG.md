@@ -2,7 +2,7 @@
 
 ## [0.1.0] - 2026-11-09
 
-W4 reports and demo, on top of the W3 checks. Not a release.
+First public release: offline cost and reliability audit for JSONL, OTLP/JSON, Langfuse, and OpenAI usage CSV exports, with reports and demo.
 
 - `tracetally report` writes `report.md`, a single-file `report.html` (inline
   CSS, inline SVG, no JavaScript), and `findings.json` (`schema_version` 1).
