@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.1.0.dev0
+## 0.1.0 — TBD
 
-W4 reports and demo, on top of the W3 checks. Not a release.
+W4 reports and demo, on top of the W3 checks.
 
 - `tracetally report` writes `report.md`, a single-file `report.html` (inline
   CSS, inline SVG, no JavaScript), and `findings.json` (`schema_version` 1).

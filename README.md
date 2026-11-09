@@ -4,7 +4,7 @@ Offline cost and reliability audit for LLM traces you already exported.
 
 Your LLM bill tells you the total. tracetally tells you why.
 
-This tree is the W4 milestone (`0.1.0.dev0`): it reads JSONL, OTLP/JSON,
+This tree is the W4 milestone (`0.1.0`): it reads JSONL, OTLP/JSON,
 Langfuse, and OpenAI usage CSV exports, ranks savings and reliability
 findings, and writes `report.md`, `report.html`, and `findings.json`.
 A cost-only file says which checks it cannot run, and why.
@@ -409,9 +409,8 @@ stays read-only: you export the files, and nothing is routed through a gateway.
 
 ## Release
 
-`pyproject.toml` stays at `0.1.0.dev0` until the commit that is tagged. The
-version string PyPI receives is that field on the tagged commit, so set it
-to `0.1.0` in the release commit before tagging.
+`pyproject.toml` is `0.1.0` on the commit that is tagged. The
+version string PyPI receives is that field on the tagged commit.
 
 Pushing a tag that matches `v*` runs `.github/workflows/release.yml`. For
 this release the tag is `v0.1.0`. The build job runs `python -m build`

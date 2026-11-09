@@ -69,7 +69,7 @@ def test_schema_exports_finding_contract() -> None:
         recommendation="Cache the prefix.",
     )
     result = RunResult(
-        tracetally_version="0.1.0.dev0",
+        tracetally_version="0.1.0",
         findings=[finding],
         price_table_id="2026-10",
         price_table_retrieved_on="2026-10-15",
