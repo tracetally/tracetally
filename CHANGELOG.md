@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0.dev0
+## [0.1.0] - 2026-11-09
 
 W4 reports and demo, on top of the W3 checks. Not a release.
 

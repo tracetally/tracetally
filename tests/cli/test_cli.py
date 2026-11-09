@@ -133,7 +133,7 @@ providers:
 
     version = runner.invoke(app, ["version"])
     assert version.exit_code == 0
-    assert version.output.strip() == "0.1.0.dev0"
+    assert version.output.strip() == "0.1.0"
 
     help_text = runner.invoke(app, ["--help"])
     assert help_text.exit_code == 0
