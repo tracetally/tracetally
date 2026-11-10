@@ -141,3 +141,21 @@ def test_ci_smokes_analyze_and_disables_run_until_later_prs() -> None:
     assert "tracetally summary" not in release
     assert "environment:" in release
     assert "id-token: write" in release
+
+
+def test_ci_matrix_is_trimmed_while_the_repo_is_private() -> None:
+    text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "pull_request:" in text
+    assert "workflow_dispatch:" in text
+    assert "full_matrix:" in text
+    assert "type: boolean" in text
+    assert "cancel-in-progress: true" in text
+    assert "branches:\n      - main" in text
+    assert 'python-version=["3.10","3.13"]' in text
+    assert 'os=["ubuntu-latest","macos-latest","windows-latest"]' in text
+    assert 'python-version=["3.10","3.11","3.12","3.13"]' in text
+    assert "visibility" in text
+    assert "refs/heads/main" in text
+    assert "Revert this trim once the repo is public" in text
+    assert "analyze --offline" in text
+    assert text.count("if: ${{ false }}") == 3
