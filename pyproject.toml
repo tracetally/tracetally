@@ -84,7 +84,7 @@ include = [
   "SECURITY.md",
   "pyproject.toml",
 ]
-# Test fixtures and examples stay in git. They are not package data.
+# Data files are not package data. Test inputs are generated at runtime.
 # The bundled LiteLLM snapshot is force-included below.
 exclude = [
   "**/*.json",
