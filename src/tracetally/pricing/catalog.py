@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -16,6 +17,7 @@ BUNDLED_NAME = "model_prices_and_context_window.json"
 BUNDLED_SNAPSHOT_DATE = date(2026, 11, 10)
 _MILLION = Decimal(1_000_000)
 _SKIP_KEYS = frozenset({"sample_spec"})
+_ABOVE = re.compile(r"above_(\d+)k_tokens")
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,7 @@ class CatalogEntry:
     flex: TierRates | None
     alias_of: str | None
     zero_price: bool
+    other_thresholds: tuple[int, ...] = ()
 
     @property
     def has_rates(self) -> bool:
@@ -136,6 +139,7 @@ def _parse_entry(key: str, raw: dict[str, object]) -> CatalogEntry | None:
         flex=flex,
         alias_of=alias_of,
         zero_price=zero,
+        other_thresholds=_other_thresholds(raw),
     )
 
 
@@ -176,6 +180,26 @@ def _tier(raw: dict[str, object], suffix: str) -> TierRates | None:
         long_cached=long_cached,
         long_creation=long_creation,
     )
+
+
+def _other_thresholds(raw: dict[str, object]) -> tuple[int, ...]:
+    """Token thresholds other than 200k that this entry publishes a rate for.
+
+    The cost engine applies only the 200k tier exactly. Crossing one of these
+    still has to be visible, so the call is labelled approximate.
+    """
+    found: set[int] = set()
+    for key, value in raw.items():
+        if value is None or "cost" not in key:
+            continue
+        matched = _ABOVE.search(key)
+        if matched is None:
+            continue
+        thousand = int(matched.group(1))
+        if thousand == 200:
+            continue
+        found.add(thousand * 1000)
+    return tuple(sorted(found))
 
 
 def _per_million(value: object) -> Decimal | None:

@@ -583,8 +583,8 @@ def _discount_rate(value: float | None) -> Decimal | None:
     if value is None:
         return None
     rate = Decimal(str(value))
-    if rate < 0 or rate > 1:
-        raise UsageError("--discount must be a fraction from 0 to 1")
+    if rate < 0 or rate >= 1:
+        raise UsageError("--discount must be a fraction in [0, 1)")
     return rate
 
 

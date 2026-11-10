@@ -97,6 +97,8 @@ def test_planted_issues_match_and_control_is_clean(tmp_path: Path) -> None:
         swap = next(item for item in document["findings"] if item["check"] == "model_swap")
         assert swap["what_if"] is True
         assert _WHAT_IF in swap["recommendation"]
+        bloat = next(item for item in document["findings"] if item["check"] == "token_bloat")
+        assert any("repriced from token counts" in caveat for caveat in bloat["caveats"])
         assert all(
             item["what_if"] is False
             for item in document["findings"]

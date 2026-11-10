@@ -19,7 +19,7 @@ from tracetally.core.money import format_usd
 from tracetally.core.schema import Capability, SkippedCheck
 from tracetally.core.stats import percentiles_or_none, rate
 from tracetally.core.store import TraceStore
-from tracetally.pricing.table import PriceTable
+from tracetally.pricing.table import PriceTable, request_size
 
 SUMMARY_SCHEMA_VERSION = 1
 
@@ -71,6 +71,9 @@ class GroupSummary:
     priced_calls: int = 0
     unpriced_calls: int = 0
     reported_cost_usd: Decimal | None = None
+    inferred_cost_usd: Decimal | None = None
+    billed_cost_usd: Decimal | None = None
+    cost_gap: bool = False
     price_match: str | None = None
     price_label: str | None = None
     durations_ms: list[float] = field(default_factory=list)
@@ -95,6 +98,8 @@ class Summary:
     priced_share: str
     show_discount: bool
     currency: str
+    fx_rate: str
+    fx_user_supplied: bool
     by_model: list[GroupSummary]
     by_endpoint_model: list[GroupSummary]
     warnings: list[str]
@@ -112,6 +117,9 @@ class Summary:
     priced_calls: int
     unpriced_calls: int
     reported_cost_usd: Decimal | None
+    inferred_cost_usd: Decimal | None
+    billed_cost_usd: Decimal | None
+    cost_gap: bool
     n_429: int
     n_5xx: int
     n_error: int
@@ -132,6 +140,8 @@ class Summary:
             "price_sha256": self.price_sha256,
             "priced_share": self.priced_share,
             "currency": self.currency,
+            "fx_rate": self.fx_rate,
+            "fx_user_supplied": self.fx_user_supplied,
             "methodology": METHODOLOGY,
             "inputs": self.inputs,
             "time_span": {
@@ -152,6 +162,9 @@ class Summary:
                 "unpriced_calls": self.unpriced_calls,
                 "priced_share": self.priced_share,
                 "reported_cost_usd": _money(self.reported_cost_usd),
+                "inferred_cost_usd": _money(self.inferred_cost_usd),
+                "billed_cost_usd": _money(self.billed_cost_usd),
+                "cost_gap": self.cost_gap,
             },
             "by_model": [
                 _group_dict(group, latency_measured=self.latency_measured)
@@ -211,6 +224,17 @@ class Summary:
             effective = format_usd(self.cost_usd)
             cost_line += f"  list {listed}  effective {effective}"
         console.print(cost_line)
+        if self.fx_user_supplied:
+            console.print(
+                f"currency {self.currency}  FX rate {self.fx_rate} was supplied by the user "
+                "and was not fetched"
+            )
+        if self.billed_cost_usd is not None or self.inferred_cost_usd is not None:
+            gap = "  large gap" if self.cost_gap else ""
+            console.print(
+                f"billed {format_usd(self.billed_cost_usd)}  "
+                f"inferred {format_usd(self.inferred_cost_usd)}{gap}"
+            )
         console.print()
         console.print(_model_table(self.by_model, latency_measured=self.latency_measured))
         console.print()
@@ -257,6 +281,11 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
     total_cost: Decimal | None = None
     total_list: Decimal | None = None
     total_reported: Decimal | None = None
+    total_inferred: Decimal | None = None
+    total_billed: Decimal | None = None
+    paired_billed = Decimal(0)
+    paired_inferred = Decimal(0)
+    saw_pair = False
     priced_calls = 0
     unpriced_calls = 0
     time_start: datetime | None = None
@@ -302,9 +331,26 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
                     tier=store.service_tier[index],
                 )
         reported = store.reported_cost_usd[index]
+        if inferred is not None:
+            total_inferred = (total_inferred or Decimal(0)) + inferred
+        label = decision.label
+        if price is not None:
+            sized = request_size(
+                input_tokens,
+                cached,
+                int(store.cache_creation_tokens[index]),
+                store.cache_accounting[index],
+            )
+            if price.exceeds_unapplied_threshold(sized):
+                label = "approx."
         if reported is not None:
             cost = reported * table.config.fx_rate
             total_reported = (total_reported or Decimal(0)) + reported
+            total_billed = (total_billed or Decimal(0)) + cost
+            if inferred is not None:
+                saw_pair = True
+                paired_billed += cost
+                paired_inferred += inferred
             priced_calls += 1
             total_cost = (total_cost or Decimal(0)) + cost
             if price is None:
@@ -358,7 +404,8 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
                 list_cost=list_cost if reported is None else None,
                 priced=cost is not None,
                 price_match=decision.step,
-                price_label=decision.label,
+                price_label=label,
+                inferred=inferred,
                 reported=reported,
                 duration=duration,
                 is_429=is_429,
@@ -406,6 +453,8 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
         priced_share=_share(priced_calls, len(store)),
         show_discount=table.discounts_active,
         currency=table.currency,
+        fx_rate=format(table.config.fx_rate, "f"),
+        fx_user_supplied=table.config.fx_user_supplied,
         by_model=_sort_groups(list(by_model.values())),
         by_endpoint_model=sorted(
             by_endpoint.values(),
@@ -435,6 +484,9 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
         priced_calls=priced_calls,
         unpriced_calls=unpriced_calls,
         reported_cost_usd=total_reported,
+        inferred_cost_usd=total_inferred,
+        billed_cost_usd=total_billed,
+        cost_gap=_large_gap(paired_billed, paired_inferred) if saw_pair else False,
         n_429=sum(group.n_429 for group in by_model.values()),
         n_5xx=sum(group.n_5xx for group in by_model.values()),
         n_error=sum(group.n_error for group in by_model.values()),
@@ -448,6 +500,13 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
 
 def _has(store: TraceStore, capability: Capability) -> bool:
     return store.capabilities is not None and capability in store.capabilities
+
+
+def _large_gap(billed: Decimal, inferred: Decimal) -> bool:
+    scale = max(abs(billed), abs(inferred))
+    if scale == 0:
+        return False
+    return abs(billed - inferred) / scale >= Decimal("0.1")
 
 
 def _share(priced: int, calls: int) -> str:
@@ -490,6 +549,7 @@ def _accumulate(
     priced: bool,
     price_match: str | None,
     price_label: str | None,
+    inferred: Decimal | None,
     reported: Decimal | None,
     duration: float | None,
     is_429: bool,
@@ -513,9 +573,24 @@ def _accumulate(
     if price_match:
         group.price_match = price_match if group.price_match in {None, price_match} else "mixed"
     if price_label:
-        group.price_label = price_label if group.price_label in {None, price_label} else "mixed"
+        if group.price_label in {None, price_label}:
+            group.price_label = price_label
+        elif "approx." in {group.price_label, price_label}:
+            group.price_label = "approx."
+        else:
+            group.price_label = "mixed"
+    if inferred is not None:
+        group.inferred_cost_usd = (group.inferred_cost_usd or Decimal(0)) + inferred
     if reported is not None:
         group.reported_cost_usd = (group.reported_cost_usd or Decimal(0)) + reported
+        group.billed_cost_usd = (group.billed_cost_usd or Decimal(0)) + (
+            cost if cost is not None else reported
+        )
+        if inferred is not None and cost is not None:
+            group.cost_gap = _large_gap(
+                (group.billed_cost_usd or Decimal(0)),
+                (group.inferred_cost_usd or Decimal(0)),
+            )
     if duration is not None:
         group.durations_ms.append(duration)
     if is_429:
@@ -570,6 +645,9 @@ def _group_dict(group: GroupSummary, *, latency_measured: bool) -> dict[str, obj
         "priced_calls": group.priced_calls,
         "unpriced_calls": group.unpriced_calls,
         "reported_cost_usd": _money(group.reported_cost_usd),
+        "inferred_cost_usd": _money(group.inferred_cost_usd),
+        "billed_cost_usd": _money(group.billed_cost_usd),
+        "cost_gap": group.cost_gap,
         "price_match": group.price_match,
         "price_label": group.price_label or None,
         "latency_ms": {

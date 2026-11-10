@@ -53,6 +53,11 @@ class ModelPrice:
     label: str = ""
     discount: Decimal = Decimal(0)
     fx_rate: Decimal = Decimal(1)
+    other_thresholds: tuple[int, ...] = ()
+
+    def exceeds_unapplied_threshold(self, sized_tokens: int) -> bool:
+        """True when a non-200k long-context rate exists and this request is past it."""
+        return any(sized_tokens > limit for limit in self.other_thresholds)
 
     def with_match(self, match: str) -> ModelPrice:
         return replace(self, match=match)
@@ -376,6 +381,7 @@ def _model_price(entry: CatalogEntry, provenance: Provenance, provider: str) -> 
         long_output=standard.long_output,
         batch_discount=discount,
         batch_cached=mode,
+        other_thresholds=entry.other_thresholds,
     )
 
 
@@ -418,6 +424,18 @@ def _tier_card(price: ModelPrice, name: str) -> TierRates | None:
     if name == "flex":
         return price.flex_rates
     return None
+
+
+def request_size(
+    input_tokens: int,
+    cached_input_tokens: int,
+    cache_creation_tokens: int,
+    cache_accounting: str,
+) -> int:
+    """Token count the long-context tier looks at for this one request."""
+    return _cache_buckets(
+        input_tokens, cached_input_tokens, cache_creation_tokens, cache_accounting
+    )[3]
 
 
 def _cache_buckets(

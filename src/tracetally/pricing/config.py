@@ -74,6 +74,7 @@ class PricingConfig:
     discounts: dict[str, Decimal] = field(default_factory=dict)
     run_discount: Decimal | None = None
     origin: str | None = None
+    fx_user_supplied: bool = False
 
     @property
     def active(self) -> bool:
@@ -108,6 +109,7 @@ class PricingConfig:
             discounts=self.discounts,
             run_discount=rate,
             origin=self.origin,
+            fx_user_supplied=self.fx_user_supplied,
         )
 
 
@@ -138,6 +140,7 @@ def parse_pricing_toml(text: str, *, origin: str) -> PricingConfig:
     document = _parse_toml(text, origin)
     currency = "USD"
     fx_rate = Decimal(1)
+    fx_user_supplied = "fx_rate" in document
     if "currency" in document:
         raw_currency = document["currency"]
         if not isinstance(raw_currency, str) or not raw_currency.strip():
@@ -146,7 +149,7 @@ def parse_pricing_toml(text: str, *, origin: str) -> PricingConfig:
     if "fx_rate" in document:
         fx_rate = _rate(document["fx_rate"], f"{origin}: fx_rate")
         if fx_rate <= 0:
-            raise PriceError(f"{origin}: fx_rate must be > 0")
+            raise PriceError(f"{origin}: fx_rate must be greater than 0")
     aliases = _string_table(document.get("aliases"), f"{origin}: aliases")
     discounts = {
         key: _discount(value, f"{origin}: discounts.{key}")
@@ -160,6 +163,7 @@ def parse_pricing_toml(text: str, *, origin: str) -> PricingConfig:
         prices=prices,
         discounts=discounts,
         origin=origin,
+        fx_user_supplied=fx_user_supplied,
     )
 
 
@@ -222,8 +226,8 @@ def _non_negative(value: object, where: str) -> Decimal:
 
 def _discount(value: object, where: str) -> Decimal:
     amount = _rate(value, where)
-    if amount < 0 or amount > 1:
-        raise PriceError(f"{where} must be a fraction from 0 to 1")
+    if amount < 0 or amount >= 1:
+        raise PriceError(f"{where} must be a fraction in [0, 1)")
     return amount
 
 

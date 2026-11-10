@@ -8,7 +8,7 @@ Acme Support Bot is a planted sample, not a customer export.{% if demo_seed is n
 
 tracetally {{ version }} · no telemetry
 
-Generated {{ generated_at }}. Prices {{ price_source }} from {{ price_url }}, retrieved {{ price_retrieved_on }}, sha256 {{ price_sha256 }}. {{ currency }}.
+Generated {{ generated_at }}. Prices {{ price_source }} from {{ price_url }}, retrieved {{ price_retrieved_on }}, sha256 {{ price_sha256 }}. Currency {{ currency }}.{% if fx_user_supplied %} FX rate {{ fx_rate }} was supplied by the user and was not fetched.{% endif %}
 
 ## Executive summary
 
@@ -17,6 +17,7 @@ Cost-only export. Trace-level checks were skipped. The observability gap lists t
 
 {% endif %}
 - Observed spend: {{ observed_cost }} {{ currency }}{% if show_discount %} (list {{ list_observed }}, effective {{ observed_cost }}){% endif %}
+- Billed: {{ billed_cost }} {{ currency }} · Inferred: {{ inferred_cost }} {{ currency }}{% if cost_gap %} · large gap{% endif %}
 - Est. monthly spend: {{ monthly_spend }} {{ currency }}
 - Window: {{ window_start }} to {{ window_end }}
 - Calls: {{ calls }} · priced share {{ priced_share }} ({{ priced_calls }}/{{ calls }}){% if unpriced_calls %} · {{ unpriced_calls }} unpriced{% endif %}
@@ -37,7 +38,7 @@ Charts are in `report.html` (inline SVG, no JavaScript).
 
 ## Findings
 
-Ranked by estimated monthly dollars (mid), then confidence. Ranges are low / mid / high. What-if is price only.
+Ranked by estimated monthly dollars (mid), then confidence. Ranges are low / mid / high. Savings are estimates repriced from token counts and list rates. What-if is price only.
 
 {% if findings %}
 {% for card in findings %}

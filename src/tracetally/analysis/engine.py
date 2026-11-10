@@ -36,9 +36,12 @@ ANALYZE_METHODOLOGY = (
     "on tokens that are not already cached. Batch candidates use 50/75/100% of calls "
     "movable, and the batch price is the published batch rate rather than a flat "
     "half of every token. Retry waste and agent loops are observed spend, so "
-    "low, mid, and high match. Model swap is a what-if: price only, validate quality "
-    "with evals. It is not added to the savings total."
+    "low, mid, and high match. Those savings are estimates: they are repriced from "
+    "token counts and list rates, not from a billed cost. Model swap is a what-if: "
+    "price only, validate quality with evals. It is not added to the savings total."
 )
+
+_ESTIMATE_CAVEAT = "Estimate: repriced from token counts and list rates, not from a billed cost."
 
 
 @dataclass
@@ -191,6 +194,11 @@ def analyze(store: TraceStore, table: PriceTable, cfg: AnalyzeConfig | None = No
             skipped.append(SkippedCheck(check=check.id, reason=reason))
             continue
         findings.extend(check.run(store, table, selected))
+    for item in findings:
+        if item.check in RELIABILITY_CHECKS or _zero(item):
+            continue
+        if _ESTIMATE_CAVEAT not in item.caveats:
+            item.caveats.append(_ESTIMATE_CAVEAT)
     findings.sort(key=_rank)
     return Analysis(
         summary=summary,

@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from tracetally.analysis.summary import summarize
 from tracetally.config import ReaderConfig
 from tracetally.pricing.config import load_pricing_config
@@ -350,6 +352,180 @@ def test_over_200k_tier_is_per_request(tmp_path: Path) -> None:
     result = _summarize(path, prices)
     # 150k and 150k stay on the $1 rate. Only the 250k request uses $3.
     assert result.cost_usd == Decimal("1.05")
+    assert result.by_model[0].price_label is None
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "separate"),
+    [
+        ("openai", "gpt-4o", False),
+        ("gemini", "gemini-2.5-flash", False),
+        ("anthropic", "claude-sonnet", True),
+        ("bedrock", "anthropic.claude-sonnet", True),
+        ("vertex_ai", "claude-sonnet", True),
+    ],
+)
+def test_cache_accounting_follows_the_provider(
+    tmp_path: Path, provider: str, model: str, separate: bool
+) -> None:
+    prices = _price_file(
+        tmp_path,
+        {
+            model: _model(
+                provider,
+                "1",
+                "0",
+                cache_read_input_token_cost=_per_token("0.25"),
+                cache_creation_input_token_cost=_per_token("3.75"),
+            )
+        },
+    )
+    extra: dict[str, object] = {
+        "provider": provider,
+        "input_tokens": 1000,
+        "cached_input_tokens": 400,
+        "output_tokens": 0,
+    }
+    if separate:
+        extra["cache_creation_input_tokens"] = 100
+    path = _jsonl(tmp_path, [_call(model, **extra)])
+    store = load_paths([path], ReaderConfig())
+    result = _summarize(path, prices)
+    if separate:
+        assert store.cache_accounting[0] == "separate"
+        # 1000 at $1, 400 reads at $0.25, 100 writes at $3.75. Not subtracted.
+        assert result.cost_usd == Decimal("0.001475")
+    else:
+        assert store.cache_accounting[0] == "included"
+        # 600 at $1 and 400 at $0.25. Subtracted once.
+        assert result.cost_usd == Decimal("0.0007")
+
+
+def test_non_200k_long_context_threshold_is_labelled_approx(tmp_path: Path) -> None:
+    prices = _price_file(
+        tmp_path,
+        {
+            "gem-128": _model(
+                "gemini",
+                "1",
+                "0",
+                input_cost_per_token_above_128k_tokens=_per_token("5"),
+                output_cost_per_token_above_128k_tokens=_per_token("0"),
+            ),
+            "exact-200": _model(
+                "openai",
+                "1",
+                "0",
+                input_cost_per_token_above_200k_tokens=_per_token("3"),
+                output_cost_per_token_above_200k_tokens=_per_token("0"),
+            ),
+        },
+    )
+    path = _jsonl(
+        tmp_path,
+        [
+            _call("gem-128", provider="gemini", input_tokens=150_000, record_id="over"),
+            _call("gem-128", provider="gemini", input_tokens=100_000, record_id="under"),
+            _call("exact-200", input_tokens=250_000, record_id="long"),
+        ],
+    )
+    result = _summarize(path, prices)
+    by_model = {row.model: row for row in result.by_model}
+    # 150k is past 128k, but only the 200k tier is applied exactly, so this stays
+    # on the $1 base rate and is labelled approximate. 100k is under 128k.
+    over = by_model["gem-128"]
+    assert over.price_label == "approx."
+    assert over.cost_usd == Decimal("0.25")
+    exact = by_model["exact-200"]
+    assert exact.price_label is None
+    assert exact.cost_usd == Decimal("0.75")
+
+
+def test_report_shows_billed_and_inferred_and_flags_a_large_gap(tmp_path: Path) -> None:
+    from datetime import datetime, timezone
+
+    from tracetally.analysis.engine import analyze
+    from tracetally.report.render import ReportOptions, write_report
+
+    prices = _price_file(tmp_path, {"gpt-4o": _model("openai", "1", "0")})
+    path = _jsonl(
+        tmp_path,
+        [_call("gpt-4o", input_tokens=1_000_000, reported_cost_usd="2")],
+    )
+    table = table_from_bytes(prices.read_bytes())
+    store = load_paths([path], ReaderConfig())
+    result = summarize(store, table)
+    assert result.cost_usd == Decimal("2")
+    assert result.inferred_cost_usd == Decimal("1")
+    assert result.billed_cost_usd == Decimal("2")
+    assert result.cost_gap is True
+    written = write_report(
+        store,
+        analyze(store, table),
+        ReportOptions(
+            out=tmp_path / "out",
+            redact=False,
+            include_content=False,
+            content_requested=False,
+            footer=False,
+            synthetic=False,
+            demo_seed=None,
+            generated_at=datetime(2026, 11, 10, tzinfo=timezone.utc),
+        ),
+    )
+    markdown = written.markdown.read_text(encoding="utf-8")
+    html = written.html.read_text(encoding="utf-8")
+    for document in (markdown, html):
+        assert "2.000000" in document
+        assert "1.000000" in document
+        assert "large gap" in document
+        assert "repriced from token counts" in document
+    findings = json.loads(written.findings.read_text(encoding="utf-8"))
+    assert findings["totals"]["billed_cost_usd"] == "2"
+    assert findings["totals"]["inferred_cost_usd"] == "1"
+    assert findings["totals"]["cost_gap"] is True
+
+
+def test_discount_below_one_and_fx_above_zero(tmp_path: Path) -> None:
+    from tracetally.core.errors import PriceError
+    from tracetally.pricing.config import parse_pricing_toml
+
+    with pytest.raises(PriceError, match=r"\[0, 1\)"):
+        parse_pricing_toml('[discounts]\n"*" = "1"\n', origin="t.toml")
+    with pytest.raises(PriceError, match=r"\[0, 1\)"):
+        parse_pricing_toml('[discounts]\n"*" = "-0.1"\n', origin="t.toml")
+    with pytest.raises(PriceError, match="greater than 0"):
+        parse_pricing_toml('fx_rate = "0"\n', origin="t.toml")
+    with pytest.raises(PriceError, match="greater than 0"):
+        parse_pricing_toml('fx_rate = "-1"\n', origin="t.toml")
+
+    prices = _price_file(tmp_path, {"gpt-4o": _model("openai", "2", "0")})
+    config = tmp_path / "tracetally.toml"
+    config.write_text('currency = "EUR"\nfx_rate = "0.5"\n', encoding="utf-8")
+    path = _jsonl(tmp_path, [_call("gpt-4o")])
+    result = _summarize(path, prices, config=config)
+    assert result.currency == "EUR"
+    assert result.fx_user_supplied is True
+    assert "supplied by the user" in result.to_text()
+    assert "EUR" in result.to_text()
+
+
+def test_prices_flag_is_not_in_readme_docs_or_help() -> None:
+    from typer.testing import CliRunner
+
+    from tracetally.cli import app
+
+    root = Path(__file__).resolve().parents[1]
+    assert "--prices" not in (root / "README.md").read_text(encoding="utf-8")
+    docs = root / "docs"
+    for path in docs.rglob("*"):
+        if path.is_file():
+            assert "--prices" not in path.read_text(encoding="utf-8")
+    runner = CliRunner()
+    for args in (["--help"], ["summary", "--help"], ["analyze", "--help"], ["report", "--help"]):
+        result = runner.invoke(app, args)
+        assert result.exit_code == 0
+        assert "--prices" not in result.output
 
 
 def test_batch_priority_flex_only_when_export_shows_tier(tmp_path: Path) -> None:
