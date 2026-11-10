@@ -88,7 +88,7 @@ def test_planted_issues_match_and_control_is_clean(tmp_path: Path) -> None:
         assert CANARY not in text
         assert CANARY not in payload
         assert _WHAT_IF in text
-        assert "Offline. No network calls. No telemetry." in text
+        assert "No telemetry." in text
         document = json.loads(payload)
         assert document["analyze_schema_version"] == 1
         assert document["totals"]["est_monthly_savings_usd"]["mid"] == "0.02379"
@@ -355,7 +355,7 @@ def test_analyze_command_json_skips_and_exit_codes(tmp_path: Path) -> None:
     )
     assert machine.exit_code == 0, machine.output
     payload = json.loads(machine.stdout or machine.output)
-    assert payload["totals"]["observed_cost_usd"] == "0.27241"
+    assert payload["totals"]["observed_cost_usd"] == "0.29241"
     assert not any(item["check"] == "token_bloat" for item in payload["findings"])
     assert any(
         item["check"] == "token_bloat" and item["reason"] == "skipped with --skip"

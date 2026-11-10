@@ -81,6 +81,9 @@ class LLMCall(BaseModel):
     error_type: str | None = None
     attempt: int | None = Field(default=None, ge=0)
     is_batch: bool | None = None
+    service_tier: str | None = None
+    base_url: str | None = None
+    tokens_known: bool = True
     interactive: bool | None = None
     prefix_hashes: tuple[tuple[int, str], ...] | None = None
     content_hash: str | None = None
@@ -176,6 +179,10 @@ class RunResult(BaseModel):
     show_footer: bool = True
     price_table_id: str
     price_table_retrieved_on: str
+    price_source: str = ""
+    price_url: str = ""
+    price_sha256: str = ""
+    priced_share: str = ""
     currency: str = "USD"
     methodology: str = ""
     monthly_factor: str = "1"

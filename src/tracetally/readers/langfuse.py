@@ -397,6 +397,8 @@ class LangfuseReader(BaseReader):
         content = retained_content(input_parts) if cfg.include_content else None
         reported = _reported_cost(row)
         batch = _flag(first(meta, "is_batch", "batch"))
+        service_tier = _text(first(meta, "service_tier", "tier"))
+        base_url = _text(first(meta, "base_url", "api_base"))
         tag_values = first(row, "tags")
         if tag_values is None and context:
             tag_values = context.get("tags")
@@ -430,6 +432,9 @@ class LangfuseReader(BaseReader):
             error_type=error_type if status is Status.ERROR else None,
             attempt=None,
             is_batch=batch,
+            service_tier=service_tier.casefold() if service_tier else None,
+            base_url=base_url,
+            tokens_known=True,
             interactive=_flag(first(meta, "interactive")),
             prefix_hashes=prefixes or None,
             content_hash=digest,

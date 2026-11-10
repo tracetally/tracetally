@@ -72,7 +72,7 @@ def test_cost_csv_uses_aliases_and_keeps_reported_cost() -> None:
     assert result.latency_measured is False
     assert result.errors_measured is False
     assert result.priced_calls == 1
-    assert result.cost_usd == Decimal(0)
+    assert result.cost_usd == Decimal("1.25")
     assert result.reported_cost_usd == Decimal("1.25")
     names = {item.check for item in result.skipped_checks}
     assert "agent_loops" in names
@@ -132,8 +132,8 @@ def test_dashboard_cached_input_tokens_header(tmp_path: Path) -> None:
     assert "ignored extra columns" not in warnings
     assert "Cached Input Tokens -> cached_input_tokens" in warnings
     result = summarize(store, load_bundled())
-    # Uncached 935000 * $2.50 + cached 310000 * $1.25 + output 680000 * $10, per 1M.
-    assert result.cost_usd == Decimal("9.525")
+    # The CSV's billed cost beats the inferred list price.
+    assert result.cost_usd == Decimal("10.15")
 
 
 def test_audio_tokens_are_not_added(tmp_path: Path) -> None:

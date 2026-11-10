@@ -63,9 +63,9 @@ def test_summary_cost_latency_and_error_rates(tmp_path: Path) -> None:
         assert result.calls == 235
         assert result.requests == 235
         assert result.spans == spans
-        assert result.priced_calls == 233
-        assert result.unpriced_calls == 2
-        assert result.cost_usd == expected
+        assert result.priced_calls == 235
+        assert result.unpriced_calls == 0
+        assert result.cost_usd == expected + Decimal("0.02")
         assert result.n_429 == 11
         assert result.n_5xx == 1
         assert result.n_error == 12
@@ -85,19 +85,20 @@ def test_summary_cost_latency_and_error_rates(tmp_path: Path) -> None:
         assert draft.latency().hidden
         assert draft.cost_usd == claude
         private = by_model[("openai", "acme-private-llm")]
-        assert private.cost_usd is None
+        assert private.cost_usd == Decimal("0.02")
         assert private.reported_cost_usd == Decimal("0.02")
         assert any("acme-private-llm" in warning for warning in result.warnings)
-        assert any("gemini-2.5-flash" in warning for warning in result.warnings)
         text = result.to_text()
         assert "gpt-4o-mini" in text
         assert "support.reply" in text
         assert "n<20" in text
-        assert "0.272410" in text
+        assert "0.292410" in text
         assert "acme-private-llm" in text
+        assert result.price_source == "bundled"
+        assert result.priced_share == "100.00%"
         payload = result.to_dict()
         assert payload["summary_schema_version"] == 1
-        assert payload["totals"]["cost_usd"] == "0.27241"
+        assert payload["totals"]["cost_usd"] == "0.29241"
         assert payload["error_rates"]["n_429"] == 11
         assert payload["error_rates"]["n_5xx"] == 1
         assert payload["mode"] == "trace"

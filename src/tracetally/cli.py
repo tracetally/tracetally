@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Command line. Reads files the user names. Opens no sockets."""
+"""Command line. Reads files the user names. No telemetry.
+
+The only network request is a GET of LiteLLM's price file, unless ``--offline``.
+"""
 
 from __future__ import annotations
 
 import json
 import secrets
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
@@ -23,14 +27,15 @@ from tracetally.readers.base import load_paths, registry, registry_problems
 app = typer.Typer(
     name="tracetally",
     help=(
-        "Offline cost and reliability audit for exported LLM traces. "
-        "Reads files you already have. Makes no network calls and sends no telemetry."
+        "Cost and reliability audit for exported LLM traces. "
+        "Reads files you already have. Sends no telemetry. "
+        "The only network request is the LiteLLM price file; --offline uses the bundled snapshot."
     ),
     no_args_is_help=True,
     add_completion=False,
 )
 prices_app = typer.Typer(
-    help="List the bundled price table, or check it. A --prices file is merged over the bundle.",
+    help="List the loaded price table, or check it. Overrides come from tracetally.toml.",
     no_args_is_help=False,
     invoke_without_command=True,
     add_completion=False,
@@ -41,6 +46,8 @@ EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_INPUT = 3
 EXIT_UNPRICED = 4
+_PRICING_CONFIG_HELP = "tracetally.toml: aliases, prices, discounts, FX."
+_DISCOUNT_HELP = "Fraction off list price (0.1 is 10%). Shows list and effective."
 
 
 @app.command("summary")
@@ -60,9 +67,17 @@ def summary_command(
         str | None,
         typer.Option("--endpoint-attr", help="Attribute or JSONL field used as the endpoint."),
     ] = None,
-    prices: Annotated[
+    offline: Annotated[
+        bool,
+        typer.Option("--offline", help="Use the bundled price snapshot. Opens no socket."),
+    ] = False,
+    pricing_config: Annotated[
         Path | None,
-        typer.Option("--prices", help="YAML price file merged over the bundled table."),
+        typer.Option("--pricing-config", help=_PRICING_CONFIG_HELP),
+    ] = None,
+    discount: Annotated[
+        float | None,
+        typer.Option("--discount", help=_DISCOUNT_HELP),
     ] = None,
     json_output: Annotated[
         bool,
@@ -85,7 +100,11 @@ def summary_command(
                 format_name=format_name,
             ),
         )
-        table = load_prices(prices)
+        table = load_prices(
+            offline=offline,
+            pricing_config=pricing_config,
+            discount=_discount_rate(discount),
+        )
         result = summarize(store, table)
     except (ReaderError, PriceError, UsageError) as exc:
         typer.echo(f"error: {exc}", err=True)
@@ -114,9 +133,17 @@ def analyze_command(
         str | None,
         typer.Option("--endpoint-attr", help="Attribute or JSONL field used as the endpoint."),
     ] = None,
-    prices: Annotated[
+    offline: Annotated[
+        bool,
+        typer.Option("--offline", help="Use the bundled price snapshot. Opens no socket."),
+    ] = False,
+    pricing_config: Annotated[
         Path | None,
-        typer.Option("--prices", help="YAML price file merged over the bundled table."),
+        typer.Option("--pricing-config", help=_PRICING_CONFIG_HELP),
+    ] = None,
+    discount: Annotated[
+        float | None,
+        typer.Option("--discount", help=_DISCOUNT_HELP),
     ] = None,
     tier_map: Annotated[
         Path | None,
@@ -151,7 +178,9 @@ def analyze_command(
             files,
             format_name=format_name,
             endpoint_attr=endpoint_attr,
-            prices=prices,
+            offline=offline,
+            pricing_config=pricing_config,
+            discount=discount,
             tier_map=tier_map,
             config=config,
             only=only,
@@ -185,9 +214,17 @@ def report_command(
         str | None,
         typer.Option("--endpoint-attr", help="Attribute or JSONL field used as the endpoint."),
     ] = None,
-    prices: Annotated[
+    offline: Annotated[
+        bool,
+        typer.Option("--offline", help="Use the bundled price snapshot. Opens no socket."),
+    ] = False,
+    pricing_config: Annotated[
         Path | None,
-        typer.Option("--prices", help="YAML price file merged over the bundled table."),
+        typer.Option("--pricing-config", help=_PRICING_CONFIG_HELP),
+    ] = None,
+    discount: Annotated[
+        float | None,
+        typer.Option("--discount", help=_DISCOUNT_HELP),
     ] = None,
     tier_map: Annotated[
         Path | None,
@@ -240,7 +277,9 @@ def report_command(
         files,
         format_name=format_name,
         endpoint_attr=endpoint_attr,
-        prices=prices,
+        offline=offline,
+        pricing_config=pricing_config,
+        discount=discount,
         tier_map=tier_map,
         config=config,
         only=only,
@@ -285,7 +324,9 @@ def demo_command(
         [written["jsonl"]],
         format_name="jsonl",
         endpoint_attr=None,
-        prices=None,
+        offline=False,
+        pricing_config=None,
+        discount=None,
         tier_map=written["tiers"],
         config=None,
         only=None,
@@ -324,14 +365,18 @@ def version_command() -> None:
 def prices_command(ctx: typer.Context) -> None:
     """List models in the loaded price table."""
     if ctx.invoked_subcommand is None:
-        prices_list(prices=None, json_output=False)
+        prices_list(offline=False, pricing_config=None, json_output=False)
 
 
 @prices_app.command("list")
 def prices_list(
-    prices: Annotated[
+    offline: Annotated[
+        bool,
+        typer.Option("--offline", help="Use the bundled price snapshot. Opens no socket."),
+    ] = False,
+    pricing_config: Annotated[
         Path | None,
-        typer.Option("--prices", help="Override price file."),
+        typer.Option("--pricing-config", help=_PRICING_CONFIG_HELP),
     ] = None,
     json_output: Annotated[
         bool,
@@ -339,14 +384,17 @@ def prices_list(
     ] = False,
 ) -> None:
     """List models in the loaded price table."""
-    table = _load_or_exit(prices)
+    table = _load_or_exit(offline=offline, pricing_config=pricing_config)
     rows = [_price_row(table, price) for price in table.iter_models()]
     if json_output:
         typer.echo(
             json.dumps(
                 {
                     "price_table_id": table.display_id,
+                    "price_source": table.provenance.source,
+                    "price_url": table.provenance.url,
                     "retrieved_on": table.retrieved_on.isoformat(),
+                    "sha256": table.provenance.sha256,
                     "models": rows,
                 },
                 indent=2,
@@ -354,8 +402,8 @@ def prices_list(
         )
         return
     typer.echo(
-        f"price table {table.display_id}  retrieved {table.retrieved_on.isoformat()}  "
-        f"models {len(rows)}"
+        f"price table {table.display_id}  source {table.provenance.source}  "
+        f"retrieved {table.retrieved_on.isoformat()}  models {len(rows)}"
     )
     for row in rows:
         cached = row["cached_input"] if row["cached_input"] is not None else "-"
@@ -369,20 +417,25 @@ def prices_list(
 
 @prices_app.command("check")
 def prices_check(
-    prices: Annotated[
+    offline: Annotated[
+        bool,
+        typer.Option("--offline", help="Use the bundled price snapshot. Opens no socket."),
+    ] = False,
+    pricing_config: Annotated[
         Path | None,
-        typer.Option("--prices", help="Override price file."),
+        typer.Option("--pricing-config", help=_PRICING_CONFIG_HELP),
     ] = None,
     max_age_days: Annotated[
         int | None,
         typer.Option("--max-age-days", help="Fail when the table is older than this many days."),
     ] = None,
 ) -> None:
-    """Validate the price table. Every price must have source_url and retrieved_on."""
-    table = _load_or_exit(prices)
+    """Validate the loaded price table and print its provenance."""
+    table = _load_or_exit(offline=offline, pricing_config=pricing_config)
     models = table.iter_models()
     typer.echo(
-        f"ok {table.display_id} models={len(models)} retrieved={table.retrieved_on.isoformat()} "
+        f"ok {table.display_id} source={table.provenance.source} models={len(models)} "
+        f"retrieved={table.retrieved_on.isoformat()} sha256={table.provenance.sha256} "
         f"age_days={table.age_days(date.today())}"
     )
     if max_age_days is not None:
@@ -398,7 +451,9 @@ def _open_analysis(
     *,
     format_name: str | None,
     endpoint_attr: str | None,
-    prices: Path | None,
+    offline: bool,
+    pricing_config: Path | None,
+    discount: float | None,
     tier_map: Path | None,
     config: Path | None,
     only: list[str] | None,
@@ -415,7 +470,11 @@ def _open_analysis(
             include_content=include_content,
         ),
     )
-    table = load_prices(prices)
+    table = load_prices(
+        offline=offline,
+        pricing_config=pricing_config,
+        discount=_discount_rate(discount),
+    )
     selected = AnalyzeConfig(
         tier_map=load_tier_map(tier_map) if tier_map is not None else {},
         params=load_check_params(config) if config is not None else AnalyzeConfig().params,
@@ -430,7 +489,9 @@ def _emit_report(
     *,
     format_name: str | None,
     endpoint_attr: str | None,
-    prices: Path | None,
+    offline: bool,
+    pricing_config: Path | None,
+    discount: float | None,
     tier_map: Path | None,
     config: Path | None,
     only: list[str] | None,
@@ -455,7 +516,9 @@ def _emit_report(
             files,
             format_name=format_name,
             endpoint_attr=endpoint_attr,
-            prices=prices,
+            offline=offline,
+            pricing_config=pricing_config,
+            discount=discount,
             tier_map=tier_map,
             config=config,
             only=only,
@@ -508,12 +571,21 @@ def _exit_if_empty(result: Analysis) -> None:
         raise typer.Exit(code=EXIT_UNPRICED)
 
 
-def _load_or_exit(path: Path | None) -> PriceTable:
+def _load_or_exit(*, offline: bool, pricing_config: Path | None) -> PriceTable:
     try:
-        return load_prices(path)
-    except PriceError as exc:
+        return load_prices(offline=offline, pricing_config=pricing_config)
+    except (PriceError, UsageError) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=EXIT_INPUT) from exc
+
+
+def _discount_rate(value: float | None) -> Decimal | None:
+    if value is None:
+        return None
+    rate = Decimal(str(value))
+    if rate < 0 or rate > 1:
+        raise UsageError("--discount must be a fraction from 0 to 1")
+    return rate
 
 
 def _price_row(table: PriceTable, price: ModelPrice) -> dict[str, object]:

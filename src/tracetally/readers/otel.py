@@ -262,6 +262,19 @@ def _span_from_otlp(
     provider = _first_str(attrs, _PROVIDER_KEYS) or "unknown"
     endpoint = _endpoint(attrs, name, cfg)
     is_batch = parse_bool(attrs.get("tracetally.batch"))
+    service_tier = _first_str(
+        attrs,
+        ("gen_ai.request.service_tier", "llm.service_tier", "tracetally.service_tier"),
+    )
+    base_url = _first_str(
+        attrs,
+        (
+            "gen_ai.request.base_url",
+            "llm.base_url",
+            "server.address",
+            "http.url",
+        ),
+    )
     interactive_raw = attrs.get("tracetally.interactive")
     interactive = parse_bool(interactive_raw) if interactive_raw is not None else None
 
@@ -288,6 +301,9 @@ def _span_from_otlp(
         error_type=error_type,
         attempt=_optional_int_attr(attrs, ("tracetally.attempt",), field="attempt"),
         is_batch=is_batch,
+        service_tier=service_tier.casefold() if service_tier else None,
+        base_url=base_url,
+        tokens_known=True,
         interactive=interactive,
         prefix_hashes=prefixes or None,
         content_hash=digest,

@@ -138,6 +138,12 @@ def _context(
         "evals_url": EVALS_URL,
         "price_table_id": summary.price_table_id,
         "price_retrieved_on": summary.price_table_retrieved_on,
+        "price_source": summary.price_source,
+        "price_url": summary.price_url,
+        "price_sha256": summary.price_sha256,
+        "priced_share": summary.priced_share,
+        "show_discount": summary.show_discount,
+        "list_observed": format_usd(summary.list_cost_usd),
         "currency": summary.currency,
         "mode": summary.mode,
         "cost_only": summary.mode == "cost-only",
@@ -206,6 +212,10 @@ def _document(
         show_footer=options.footer,
         price_table_id=summary.price_table_id,
         price_table_retrieved_on=summary.price_table_retrieved_on,
+        price_source=summary.price_source,
+        price_url=summary.price_url,
+        price_sha256=summary.price_sha256,
+        priced_share=summary.priced_share,
         currency=summary.currency,
         methodology="\n\n".join(
             _methodology(analysis, options, content_in_report=content_in_report)
@@ -216,7 +226,9 @@ def _document(
             "calls": summary.calls,
             "priced_calls": summary.priced_calls,
             "unpriced_calls": summary.unpriced_calls,
+            "priced_share": summary.priced_share,
             "observed_cost_usd": money_text(observed),
+            "list_cost_usd": money_text(summary.list_cost_usd),
             "est_monthly_spend_usd": money_text(monthly),
             "est_monthly_savings_usd": _range_json(savings),
             "est_monthly_what_if_usd": _range_json(what_ifs),
@@ -356,16 +368,28 @@ def _range_json(amounts: tuple[Decimal, Decimal, Decimal]) -> dict[str, str]:
     }
 
 
+def _labelled(group: GroupSummary) -> str:
+    if group.price_label:
+        return f"{group.model} ({group.price_label})"
+    return group.model
+
+
+def _report_cost(group: GroupSummary) -> str:
+    if group.list_cost_usd is not None and group.cost_usd is not None:
+        return f"{format_usd(group.list_cost_usd)} list / {format_usd(group.cost_usd)} effective"
+    return format_usd(group.cost_usd)
+
+
 def _model_row(group: GroupSummary, measured: bool) -> dict[str, str]:
     latency = group.latency()
     return {
         "provider": group.provider,
-        "model": group.model,
+        "model": _labelled(group),
         "requests": str(group.requests),
         "input_tokens": str(group.input_tokens),
         "cached_input_tokens": str(group.cached_input_tokens),
         "output_tokens": str(group.output_tokens),
-        "cost": format_usd(group.cost_usd),
+        "cost": _report_cost(group),
         "n": str(latency.n),
         "p50": _lat(latency.p50, latency.hidden, measured),
         "p95": _lat(latency.p95, latency.hidden, measured),
@@ -409,7 +433,8 @@ def _methodology(
         METHODOLOGY,
         ANALYZE_METHODOLOGY,
         (
-            f"Price table {summary.price_table_id}, retrieved {summary.price_table_retrieved_on}. "
+            f"Prices {summary.price_source} from {summary.price_url}, "
+            f"retrieved {summary.price_table_retrieved_on}, sha256 {summary.price_sha256}. "
             f"Currency {summary.currency}. Monthly factor {money_text(analysis.monthly_factor)} "
             "(observed dollars times 30 / window days, with a 1-day floor)."
         ),
@@ -419,7 +444,8 @@ def _methodology(
             "Findings are ranked by estimated monthly dollars (mid), then confidence. "
             "Reliability findings with no dollars are in their own section."
         ),
-        "Offline. No network calls. No telemetry. "
+        "No telemetry. The only network request tracetally makes is the LiteLLM price file, "
+        "and this run records which copy it used. "
         "tracetally is not a proxy, gateway, SDK, or server.",
     ]
     if options.synthetic:

@@ -16,19 +16,19 @@
 {% endif %}
 
 <header>
-  <p class="meta">tracetally {{ version }} · offline report · no network calls · no telemetry</p>
+  <p class="meta">tracetally {{ version }} · no telemetry</p>
   <h1>LLM cost and reliability audit</h1>
-  <p class="muted">Generated {{ generated_at }}. Price table {{ price_table_id }}, retrieved {{ price_retrieved_on }}. {{ currency }}.</p>
+  <p class="muted">Generated {{ generated_at }}. Prices {{ price_source }} from {{ price_url }}, retrieved {{ price_retrieved_on }}, sha256 {{ price_sha256 }}. {{ currency }}.</p>
 </header>
 
 <section class="summary" id="summary">
   <h2>Executive summary</h2>
   {% if cost_only %}<p class="note">Cost-only export. Trace-level checks were skipped. The observability gap lists the fields to start logging.</p>{% endif %}
   <dl>
-    <dt>Observed spend</dt><dd>{{ observed_cost }} {{ currency }}</dd>
+    <dt>Observed spend</dt><dd>{{ observed_cost }} {{ currency }}{% if show_discount %} (list {{ list_observed }}, effective {{ observed_cost }}){% endif %}</dd>
     <dt>Est. monthly spend</dt><dd>{{ monthly_spend }} {{ currency }}</dd>
     <dt>Window</dt><dd>{{ window_start }} to {{ window_end }}</dd>
-    <dt>Calls</dt><dd>{{ calls }} priced {{ priced_calls }}/{{ calls }}{% if unpriced_calls %} · {{ unpriced_calls }} unpriced{% endif %}</dd>
+    <dt>Calls</dt><dd>{{ calls }} · priced share {{ priced_share }} ({{ priced_calls }}/{{ calls }}){% if unpriced_calls %} · {{ unpriced_calls }} unpriced{% endif %}</dd>
     <dt>Est. monthly savings</dt><dd>{{ savings_low }} / {{ savings_mid }} / {{ savings_high }}</dd>
     <dt>What-if (not in savings)</dt><dd>{{ what_if_low }} / {{ what_if_mid }} / {{ what_if_high }}</dd>
   </dl>

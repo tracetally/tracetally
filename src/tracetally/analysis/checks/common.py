@@ -80,9 +80,14 @@ def call_cost(
     model: str | None = None,
     provider: str | None = None,
 ) -> tuple[Decimal | None, ModelPrice | None]:
+    if not store.tokens_known[index]:
+        return None, None
+    use_batch = bool(store.is_batch[index]) if is_batch is None else is_batch
+    tier = store.service_tier[index] if is_batch is None else ("batch" if use_batch else "standard")
     resolved = table.resolve(
         provider if provider is not None else store.provider[index],
         model if model is not None else store.model[index],
+        base_url=store.base_url[index],
     )
     if resolved is None:
         return None, None
@@ -90,7 +95,8 @@ def call_cost(
         input_tokens=int(store.input_tokens[index]),
         output_tokens=int(store.output_tokens[index]),
         cached_input_tokens=int(store.cached_input_tokens[index]),
-        is_batch=bool(store.is_batch[index]) if is_batch is None else is_batch,
+        is_batch=use_batch,
+        tier=tier,
     )
     return amount, resolved
 

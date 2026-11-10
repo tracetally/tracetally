@@ -30,13 +30,13 @@ def test_summary_on_jsonl_and_otel(tmp_path: Path) -> None:
     assert text.exit_code == 0, text.output
     assert "gpt-4o-mini" in text.output
     assert "support.reply" in text.output
-    assert "0.272410" in text.output
-    assert "Offline. No network calls." in text.output
+    assert "0.292410" in text.output
+    assert "No telemetry." in text.output
 
     machine = runner.invoke(app, ["summary", str(jsonl), "--json"])
     assert machine.exit_code == 0, machine.output
     payload = json.loads(machine.stdout or machine.output)
-    assert payload["totals"]["cost_usd"] == "0.27241"
+    assert payload["totals"]["cost_usd"] == "0.29241"
     assert payload["totals"]["calls"] == 235
     assert payload["error_rates"]["n_429"] == 11
     assert payload["error_rates"]["rate_429"] == f"{11 / 235:.6f}"
@@ -72,22 +72,13 @@ def test_strict_missing_file_and_unpriced(tmp_path: Path) -> None:
 
 
 def test_prices_override_and_commands(tmp_path: Path) -> None:
-    prices = tmp_path / "mine.yaml"
+    prices = tmp_path / "tracetally.toml"
     prices.write_text(
         """
-schema_version: 1
-table_id: "mine"
-currency: USD
-unit: per_1m_tokens
-retrieved_on: "2026-10-15"
-providers:
-  openai:
-    models:
-      no-such-model:
-        input: "2"
-        output: "3"
-        source_url: "https://example.com/mine"
-        retrieved_on: "2026-10-15"
+[prices."no-such-model"]
+provider = "openai"
+input = "2"
+output = "3"
 """,
         encoding="utf-8",
     )
@@ -100,11 +91,21 @@ providers:
     )
     result = runner.invoke(
         app,
-        ["summary", str(unknown), "--prices", str(prices), "--endpoint-attr", "endpoint", "--json"],
+        [
+            "summary",
+            str(unknown),
+            "--offline",
+            "--pricing-config",
+            str(prices),
+            "--endpoint-attr",
+            "endpoint",
+            "--json",
+        ],
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout or result.output)
-    assert payload["price_table_id"] == "2026-10+mine"
+    assert payload["price_table_id"] == "litellm:bundled+toml"
+    assert payload["price_source"] == "bundled"
     assert payload["totals"]["cost_usd"] == "2"
     assert payload["by_endpoint_model"][0]["endpoint"] == "custom"
 
@@ -117,7 +118,7 @@ providers:
 
     checked = runner.invoke(app, ["prices", "check"])
     assert checked.exit_code == 0
-    assert "ok 2026-10" in checked.output
+    assert "source=bundled" in checked.output
 
     readers = runner.invoke(app, ["readers"])
     assert readers.exit_code == 0
@@ -144,5 +145,5 @@ def test_summary_help_lists_the_milestone_flags() -> None:
     result = runner.invoke(app, ["summary", "--help"])
     assert result.exit_code == 0
     help_text = _plain(result.output)
-    for flag in ("--format", "--endpoint-attr", "--prices", "--json", "--strict"):
+    for flag in ("--format", "--endpoint-attr", "--offline", "--json", "--strict"):
         assert flag in help_text

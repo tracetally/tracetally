@@ -168,6 +168,8 @@ def _call_from_object(obj: dict[str, Any], *, where: str, cfg: ReaderConfig) -> 
     duration = parse_float(obj.get("duration_ms"), field="duration_ms")
     reported = parse_decimal(obj.get("reported_cost_usd"), field="reported_cost_usd")
     is_batch = parse_bool(obj.get("is_batch"))
+    service_tier = _optional_str(obj.get("service_tier"))
+    base_url = _optional_str(obj.get("base_url")) or _optional_str(obj.get("api_base"))
     interactive = parse_bool(obj.get("interactive"))
     attempt = parse_optional_int(obj.get("attempt"), field="attempt")
 
@@ -194,6 +196,9 @@ def _call_from_object(obj: dict[str, Any], *, where: str, cfg: ReaderConfig) -> 
         error_type=error_type,
         attempt=attempt,
         is_batch=is_batch,
+        service_tier=service_tier.casefold() if service_tier else None,
+        base_url=base_url,
+        tokens_known=True,
         interactive=interactive,
         prefix_hashes=prefixes or None,
         content_hash=digest,
