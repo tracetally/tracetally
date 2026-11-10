@@ -14,11 +14,6 @@ def root() -> Path:
     return ROOT
 
 
-@pytest.fixture
-def examples() -> Path:
-    return ROOT / "examples"
-
-
 @pytest.fixture(autouse=True)
 def _isolated_price_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Keep price-cache lookups off the developer machine and out of other tests."""

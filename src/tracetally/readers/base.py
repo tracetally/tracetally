@@ -173,40 +173,57 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def load_paths(paths: list[Path], cfg: ReaderConfig) -> TraceStore:
-    """Stream every path into one store. Capabilities are the intersection."""
+def load_paths(paths: list[Path], cfg: ReaderConfig, *, lenient: bool = False) -> TraceStore:
+    """Stream every path into one store. Capabilities are the intersection.
+
+    ``lenient`` turns a bad file into a warning and keeps reading the rest.
+    ``tracetally run`` uses that. The other commands still fail the run.
+    """
     store = TraceStore()
     if not paths:
         raise ReaderError("no input files")
     for path in paths:
-        if not path.exists():
-            raise ReaderError("file not found", where=str(path))
-        if not path.is_file():
-            raise ReaderError("not a file", where=str(path))
-        reader_cls = select_reader(path, cfg.format_name)
-        reader = reader_cls()
-        stat = InputStat(path=str(path), sha256=file_sha256(path))
-        store.note_capabilities(frozenset(reader_cls.capabilities))
-        store.note_reader(reader_cls.name)
         try:
-            for item in reader.read(path, cfg):
-                if isinstance(item, LLMCall):
-                    store.append_call(item)
-                    stat.records += 1
-                elif isinstance(item, Span):
-                    store.append_span(item)
-                    stat.spans += 1
-                else:
-                    reader.fail(
-                        f"reader yielded {type(item).__name__}",
-                        field=None,
-                        where=str(path),
-                        cfg=cfg,
-                    )
-        finally:
-            reader.finish_warnings()
-        stat.skipped = reader.skipped
-        for warning in reader.warnings:
-            store.warn(f"{reader_cls.name}: {warning}")
-        store.inputs.append(stat)
+            _load_one(store, path, cfg)
+        except ReaderError as exc:
+            if not lenient:
+                raise
+            store.warn(f"file skipped: {exc}")
+        except OSError as exc:
+            if not lenient:
+                raise ReaderError(str(exc), where=str(path)) from exc
+            store.warn(f"file skipped: {path}: {exc}")
     return store
+
+
+def _load_one(store: TraceStore, path: Path, cfg: ReaderConfig) -> None:
+    if not path.exists():
+        raise ReaderError("file not found", where=str(path))
+    if not path.is_file():
+        raise ReaderError("not a file", where=str(path))
+    reader_cls = select_reader(path, cfg.format_name)
+    reader = reader_cls()
+    stat = InputStat(path=str(path), sha256=file_sha256(path))
+    store.note_capabilities(frozenset(reader_cls.capabilities))
+    store.note_reader(reader_cls.name)
+    try:
+        for item in reader.read(path, cfg):
+            if isinstance(item, LLMCall):
+                store.append_call(item)
+                stat.records += 1
+            elif isinstance(item, Span):
+                store.append_span(item)
+                stat.spans += 1
+            else:
+                reader.fail(
+                    f"reader yielded {type(item).__name__}",
+                    field=None,
+                    where=str(path),
+                    cfg=cfg,
+                )
+    finally:
+        reader.finish_warnings()
+    stat.skipped = reader.skipped
+    for warning in reader.warnings:
+        store.warn(f"{reader_cls.name}: {warning}")
+    store.inputs.append(stat)

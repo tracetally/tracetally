@@ -663,6 +663,80 @@ def test_openai_compatible_providers_include_cached_tokens(tmp_path: Path) -> No
     assert _summarize(path, prices).cost_usd == Decimal("0.0007")
 
 
+def test_otel_cache_overflow_is_counted_in_the_report(tmp_path: Path) -> None:
+    from tracetally.analysis.engine import analyze
+    from tracetally.pricing.table import load_bundled
+    from tracetally.report.render import ReportOptions, write_report
+
+    path = tmp_path / "overflow.json"
+    _otel_span(
+        path,
+        provider="openai",
+        model="gpt-4o-mini",
+        input_tokens=100,
+        cached=150,
+        created=0,
+    )
+    store = load_paths([path], ReaderConfig())
+    assert store.cache_accounting[0] == "embedded"
+    summary = summarize(store, load_bundled())
+    assert summary.cost_usd is not None
+    assert any(
+        "OTel cache read + cache write exceeded input_tokens on 1 call" in warning
+        for warning in summary.warnings
+    )
+    assert "OTel input counts include cache reads and cache writes" in summary.methodology
+    assert "JSONL and Langfuse exclude" not in summary.methodology
+    written = write_report(
+        store,
+        analyze(store, load_bundled()),
+        ReportOptions(out=tmp_path / "out", footer=False),
+    )
+    report = written.markdown.read_text(encoding="utf-8")
+    assert "exceeded input_tokens on 1 call" in report
+
+
+def test_jsonl_anthropic_methodology_excludes_cache_tokens(tmp_path: Path) -> None:
+    from tracetally.pricing.table import load_bundled
+
+    path = _jsonl(
+        tmp_path,
+        [
+            _call(
+                "claude-sonnet-4-5",
+                provider="anthropic",
+                input_tokens=1000,
+                cached_input_tokens=400,
+                cache_creation_input_tokens=100,
+            )
+        ],
+    )
+    summary = summarize(load_paths([path], ReaderConfig()), load_bundled())
+    assert "exclude cache reads and cache writes" in summary.methodology
+    assert "OTel input counts include" not in summary.methodology
+
+
+def test_unknown_price_table_key_is_named(tmp_path: Path) -> None:
+    prices = _price_file(tmp_path, {"gpt-4o": _model("openai", "1", "0")})
+    config = tmp_path / "tracetally.toml"
+    config.write_text(
+        "\n".join(
+            [
+                "[prices.gpt-4o]",
+                'provider = "openai"',
+                'input = "1"',
+                'output = "2"',
+                'surprise = "9"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    path = _jsonl(tmp_path, [_call("gpt-4o", input_tokens=1)])
+    result = _summarize(path, prices, config=config)
+    assert any("unknown key 'prices.gpt-4o.surprise'" in warning for warning in result.warnings)
+
+
 def test_unknown_toml_key_is_named(tmp_path: Path) -> None:
     prices = _price_file(tmp_path, {"gpt-4o": _model("openai", "1", "0")})
     config = tmp_path / "tracetally.toml"

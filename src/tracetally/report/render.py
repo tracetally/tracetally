@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
+import shutil
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -15,14 +18,23 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from markupsafe import Markup
 
 from tracetally import __version__
-from tracetally.analysis.engine import ANALYZE_METHODOLOGY, RELIABILITY_CHECKS, Analysis
-from tracetally.analysis.summary import METHODOLOGY, GroupSummary, Summary
+from tracetally._cta import AUDIT_CTA_TEXT, AUDIT_CTA_URL
+from tracetally.analysis.engine import (
+    ANALYZE_METHODOLOGY,
+    RELIABILITY_CHECKS,
+    Analysis,
+    cost_label,
+    rank_findings,
+    unknown_cost,
+)
+from tracetally.analysis.summary import GroupSummary, Summary
 from tracetally.core.errors import UsageError
 from tracetally.core.hashing import CONTENT_RETAIN_CHARS
 from tracetally.core.money import format_usd, money_text
 from tracetally.core.schema import Finding, InputDigest, RunResult
 from tracetally.core.stats import rate
 from tracetally.core.store import TraceStore
+from tracetally.report.dashboard import render_dashboard
 from tracetally.report.links import EVALS_URL, PROJECT_URL
 from tracetally.report.redact import redact_analysis
 from tracetally.report.svg import bar_chart, empty_chart, latency_chart
@@ -46,12 +58,21 @@ class ReportOptions:
     demo_seed: int | None = None
     generated_at: datetime | None = None
     redact_salt: str | None = None
+    dashboard: bool = False
 
 
 @dataclass(frozen=True)
 class WrittenReport:
     markdown: Path
     html: Path
+    findings: Path
+    analysis: Analysis
+
+
+@dataclass(frozen=True)
+class WrittenRun:
+    markdown: Path
+    dashboard: Path
     findings: Path
     analysis: Analysis
 
@@ -76,6 +97,92 @@ def write_report(store: TraceStore, analysis: Analysis, options: ReportOptions) 
     _write(html_path, html if html.endswith("\n") else html + "\n")
     _write(json_path, json.dumps(document, indent=2) + "\n")
     return WrittenReport(markdown=md_path, html=html_path, findings=json_path, analysis=shown)
+
+
+def write_run(store: TraceStore, analysis: Analysis, options: ReportOptions) -> WrittenRun:
+    """Write findings.json, report.md, and dashboard.html as one directory."""
+    ranked = rank_findings(list(analysis.findings))
+    shown = Analysis(
+        summary=analysis.summary,
+        findings=ranked,
+        skipped=list(analysis.skipped),
+        monthly_factor=analysis.monthly_factor,
+        monthly_caveats=list(analysis.monthly_caveats),
+    )
+    run_options = ReportOptions(
+        out=options.out,
+        redact=options.redact,
+        include_content=options.include_content,
+        content_requested=options.content_requested,
+        footer=options.footer,
+        synthetic=options.synthetic,
+        demo_seed=options.demo_seed,
+        generated_at=options.generated_at,
+        redact_salt=options.redact_salt,
+        dashboard=True,
+    )
+    content_in_report = run_options.include_content and not run_options.redact
+    excerpts = _excerpt_map(store, shown) if content_in_report else {}
+    if run_options.redact:
+        salt = run_options.redact_salt or secrets.token_hex(16)
+        shown = redact_analysis(shown, store, salt)
+        ranked = shown.findings
+    context = _context(shown, run_options, excerpts, content_in_report=content_in_report)
+    markdown = _environment(autoescape=False).get_template("report.md.j2").render(context)
+    document = _document(shown, run_options, excerpts, content_in_report=content_in_report)
+    _annotate_run_document(document, shown.findings)
+    html = render_dashboard(document)
+    paths = _write_atomic_dir(
+        run_options.out,
+        {
+            "report.md": markdown if markdown.endswith("\n") else markdown + "\n",
+            "dashboard.html": html,
+            "findings.json": json.dumps(document, indent=2) + "\n",
+        },
+    )
+    return WrittenRun(
+        markdown=paths["report.md"],
+        dashboard=paths["dashboard.html"],
+        findings=paths["findings.json"],
+        analysis=shown,
+    )
+
+
+def _annotate_run_document(document: dict[str, Any], findings: list[Any]) -> None:
+    document["cta_text"] = AUDIT_CTA_TEXT
+    document["cta_url"] = AUDIT_CTA_URL
+    rows = document.get("findings")
+    if not isinstance(rows, list):
+        return
+    for raw, item in zip(rows, findings, strict=True):
+        if not isinstance(raw, dict):
+            continue
+        raw["cost_known"] = not unknown_cost(item)
+        raw["cost_label"] = cost_label(item, str(document.get("currency") or "USD"))
+
+
+def _write_atomic_dir(out: Path, files: dict[str, str]) -> dict[str, Path]:
+    """Publish ``files`` into ``out``. A new directory appears in one rename."""
+    if out.exists() and not out.is_dir():
+        raise UsageError(f"--out exists and is not a directory: {out}")
+    parent = out.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".tracetally-", dir=parent))
+    try:
+        for name, text in files.items():
+            payload = text if text.endswith("\n") else text + "\n"
+            (staging / name).write_text(payload, encoding="utf-8", newline="\n")
+        if not out.exists():
+            os.replace(staging, out)
+        else:
+            for name in files:
+                os.replace(staging / name, out / name)
+            shutil.rmtree(staging)
+    except Exception:
+        if staging.exists() and staging != out:
+            shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return {name: out / name for name in files}
 
 
 def _prepare_dir(path: Path) -> Path:
@@ -117,11 +224,13 @@ def _context(
 ) -> dict[str, Any]:
     summary = analysis.summary
     savings, what_ifs = _split_totals(analysis.findings)
+    currency = summary.currency
     cards = [
-        _card(item, rank, excerpts) for rank, item in enumerate(_dollar(analysis.findings), start=1)
+        _card(item, rank, excerpts, currency)
+        for rank, item in enumerate(_dollar(analysis.findings), start=1)
     ]
     reliability = [
-        _card(item, index, excerpts)
+        _card(item, index, excerpts, currency)
         for index, item in enumerate(_reliability(analysis.findings), start=1)
     ]
     observed = summary.cost_usd
@@ -187,6 +296,9 @@ def _context(
         },
         "style": Markup(_css()),
         "schema_version": _SCHEMA_VERSION,
+        "cta_text": AUDIT_CTA_TEXT,
+        "cta_url": AUDIT_CTA_URL,
+        "dashboard": options.dashboard,
     }
 
 
@@ -304,7 +416,12 @@ def _excerpt_map(store: TraceStore, analysis: Analysis) -> dict[str, list[dict[s
     return found
 
 
-def _card(item: Finding, rank: int, excerpts: dict[str, list[dict[str, str]]]) -> dict[str, Any]:
+def _card(
+    item: Finding,
+    rank: int,
+    excerpts: dict[str, list[dict[str, str]]],
+    currency: str,
+) -> dict[str, Any]:
     amounts = item.est_monthly_usd
     has_dollars = not (amounts.mid == 0 and amounts.high == 0)
     return {
@@ -318,6 +435,8 @@ def _card(item: Finding, rank: int, excerpts: dict[str, list[dict[str, str]]]) -
         "confidence": item.confidence.value,
         "what_if": item.what_if,
         "has_dollars": has_dollars,
+        "unknown_cost": unknown_cost(item),
+        "cost_label": cost_label(item, currency),
         "low": format_usd(amounts.low),
         "mid": format_usd(amounts.mid),
         "high": format_usd(amounts.high),
@@ -347,9 +466,7 @@ def _reliability(findings: list[Finding]) -> list[Finding]:
 
 
 def _reliability_item(item: Finding) -> bool:
-    amounts = item.est_monthly_usd
-    zero = amounts.mid == 0 and amounts.high == 0
-    return item.check in RELIABILITY_CHECKS or zero
+    return item.check in RELIABILITY_CHECKS
 
 
 def _split_totals(
@@ -441,7 +558,7 @@ def _methodology(
 ) -> list[str]:
     summary = analysis.summary
     paragraphs = [
-        METHODOLOGY,
+        analysis.summary.methodology,
         ANALYZE_METHODOLOGY,
         (
             f"Prices {summary.price_source} from {summary.price_url}, "

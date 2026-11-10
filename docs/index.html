@@ -100,19 +100,15 @@
       ranks where the spend went, and writes a report on disk.
     </p>
     <p>
-      It is not a proxy, gateway, or SDK. It does not sit on the request path,
-      hold provider API keys, or send telemetry. The only network request is
-      the LiteLLM price file. Offline mode uses the bundled snapshot.
+      Runs locally. Your data never leaves your machine. The only network request tracetally makes is a price-list download, which `--offline` turns off. No telemetry, no proxy, no LLM calls.
     </p>
 
     <h2>Install</h2>
     <pre><code>pip install tracetally</code></pre>
-    <p class="muted">Python 3.10 or newer. Apache-2.0.</p>
+    <p class="muted">Python 3.10 or newer. Apache-2.0. Placeholder copy. PM will replace it.</p>
 
     <h2>Use</h2>
-    <pre><code>tracetally summary traces.jsonl
-tracetally analyze traces.jsonl
-tracetally report traces.jsonl --out ./audit</code></pre>
+    <pre><code>tracetally run traces.jsonl</code></pre>
 
     <h2>Source and contact</h2>
     <ul>

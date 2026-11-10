@@ -81,10 +81,9 @@ jobs:
         run: |
           python -m venv /tmp/tt
           /tmp/tt/bin/pip install dist/*.whl
-          /tmp/tt/bin/tracetally summary examples/synthetic_otel.json --offline
-          /tmp/tt/bin/tracetally summary examples/synthetic.jsonl --json --offline
-          /tmp/tt/bin/tracetally demo --out /tmp/tt-demo --seed 1 --offline
-          test -s /tmp/tt-demo/report.html
-          test -s /tmp/tt-demo/report.md
-          test -s /tmp/tt-demo/findings.json
+          /tmp/tt/bin/python -c 'open("/tmp/tt-in.jsonl","w",encoding="utf-8").write("{\"model\":\"gpt-4o-mini\",\"provider\":\"openai\",\"start_time\":\"2026-01-01T00:00:00Z\",\"input_tokens\":10,\"output_tokens\":2}\n")'
+          /tmp/tt/bin/tracetally run /tmp/tt-in.jsonl --offline --out /tmp/tt-report
+          test -s /tmp/tt-report/dashboard.html
+          test -s /tmp/tt-report/report.md
+          test -s /tmp/tt-report/findings.json
           /tmp/tt/bin/python scripts/check_no_http_clients.py

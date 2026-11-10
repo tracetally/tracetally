@@ -17,7 +17,7 @@ from tracetally import __version__
 from tracetally.analysis.checks import CHECKS, Check
 from tracetally.analysis.checks.common import monthly_factor
 from tracetally.analysis.skip import PLANNED_CHECKS, missing_capability_reason
-from tracetally.analysis.summary import METHODOLOGY, Summary, summarize
+from tracetally.analysis.summary import Summary, summarize
 from tracetally.config import AnalyzeConfig
 from tracetally.core.errors import UsageError
 from tracetally.core.money import format_usd
@@ -79,7 +79,7 @@ class Analysis:
             "price_sha256": self.summary.price_sha256,
             "priced_share": self.summary.priced_share,
             "currency": self.summary.currency,
-            "methodology": METHODOLOGY + " " + ANALYZE_METHODOLOGY,
+            "methodology": self.summary.methodology + " " + ANALYZE_METHODOLOGY,
             "monthly": {
                 "factor": _money(self.monthly_factor),
                 "window_start": _iso(self.summary.time_start),
@@ -169,7 +169,7 @@ class Analysis:
             for warning in self.summary.warnings:
                 console.print(f"- {warning}")
             console.print()
-        console.print(METHODOLOGY)
+        console.print(self.summary.methodology)
         console.print(ANALYZE_METHODOLOGY)
         console.print(
             f"No telemetry. Prices {summary.price_source} ({summary.price_table_retrieved_on}). "
@@ -242,6 +242,46 @@ def _skip_reason(
             "without a target model"
         )
     return None
+
+
+def unknown_cost(item: Finding) -> bool:
+    """A savings finding whose dollars could not be estimated.
+
+    Reliability findings are a known zero. A savings check that priced nothing
+    is unknown and sorts after every estimated finding.
+    """
+    if item.check in RELIABILITY_CHECKS:
+        return False
+    amounts = item.est_monthly_usd
+    return amounts.low == 0 and amounts.mid == 0 and amounts.high == 0
+
+
+def cost_label(item: Finding, currency: str) -> str:
+    if unknown_cost(item):
+        return "unknown cost"
+    if item.check in RELIABILITY_CHECKS or _zero(item):
+        return "no dollar estimate"
+    return f"{format_usd(item.est_monthly_usd.mid)} {currency}/mo"
+
+
+def rank_findings(findings: list[Finding]) -> list[Finding]:
+    """Estimated dollars saved, descending. Unknown cost is last."""
+    return sorted(findings, key=_run_rank)
+
+
+def _run_rank(item: Finding) -> tuple[int, Decimal, int, str]:
+    if unknown_cost(item):
+        section = 2
+    elif item.check in RELIABILITY_CHECKS or _zero(item):
+        section = 1
+    else:
+        section = 0
+    return (
+        section,
+        -item.est_monthly_usd.mid,
+        -_CONFIDENCE_RANK.get(item.confidence, 0),
+        item.id,
+    )
 
 
 def _rank(item: Finding) -> tuple[int, Decimal, int, str]:

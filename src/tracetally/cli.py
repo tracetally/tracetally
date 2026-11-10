@@ -16,10 +16,12 @@ from typing import Annotated
 import typer
 
 from tracetally import __version__
-from tracetally.analysis.engine import Analysis, analyze
+from tracetally._cta import AUDIT_CTA_TEXT, AUDIT_CTA_URL
+from tracetally.analysis.engine import Analysis, analyze, cost_label, rank_findings
 from tracetally.analysis.summary import summarize
 from tracetally.config import AnalyzeConfig, ReaderConfig, load_check_params, load_tier_map
 from tracetally.core.errors import PriceError, ReaderError, UsageError
+from tracetally.core.money import format_usd
 from tracetally.core.store import TraceStore
 from tracetally.pricing.table import ModelPrice, PriceTable, load_prices
 from tracetally.readers.base import load_paths, registry, registry_problems
@@ -48,6 +50,61 @@ EXIT_INPUT = 3
 EXIT_UNPRICED = 4
 _PRICING_CONFIG_HELP = "tracetally.toml: aliases, prices, discounts, FX."
 _DISCOUNT_HELP = "Fraction off list price (0.1 is 10%). Shows list and effective."
+_RUN_USAGE = "usage: tracetally run [PATH ...] [--offline] [--out DIR] [--pricing-config FILE]"
+
+
+@app.command("run")
+def run_command(
+    files: Annotated[
+        list[Path] | None,
+        typer.Argument(help="Trace files. JSONL, OTLP JSON, Langfuse export, or OpenAI usage CSV."),
+    ] = None,
+    offline: Annotated[
+        bool,
+        typer.Option("--offline", help="Use the bundled price snapshot. Opens no socket."),
+    ] = False,
+    out: Annotated[
+        Path,
+        typer.Option("--out", help="Directory for findings.json, report.md, and dashboard.html."),
+    ] = Path("tracetally-report"),
+    pricing_config: Annotated[
+        Path | None,
+        typer.Option("--pricing-config", help=_PRICING_CONFIG_HELP),
+    ] = None,
+) -> None:
+    """Read traces, price them, and write a ranked report. Bad files are warnings."""
+    if not files:
+        typer.echo(
+            "tracetally run needs a trace file. "
+            "Auto-detect with no PATH is not in this release.\n" + _RUN_USAGE,
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_USAGE)
+    from tracetally.report.render import ReportOptions, write_run
+
+    try:
+        store = load_paths(list(files), ReaderConfig(), lenient=True)
+        for warning in store.warnings:
+            if warning.startswith("file skipped:"):
+                typer.echo(f"warning: {warning}", err=True)
+        table = load_prices(offline=offline, pricing_config=pricing_config)
+        result = analyze(store, table)
+        written = write_run(
+            store,
+            result,
+            ReportOptions(
+                out=out,
+                generated_at=datetime.now(timezone.utc),
+                dashboard=True,
+            ),
+        )
+    except UsageError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_USAGE) from exc
+    except (ReaderError, PriceError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_INPUT) from exc
+    _print_run_summary(written.analysis, out)
 
 
 @app.command("summary")
@@ -294,57 +351,6 @@ def report_command(
     )
 
 
-@app.command("demo")
-def demo_command(
-    out: Annotated[
-        Path,
-        typer.Option("--out", help="Directory for the synthetic files and the report."),
-    ] = Path("tracetally-demo"),
-    seed: Annotated[
-        int,
-        typer.Option("--seed", help="Label recorded on the demo. The planted rows do not change."),
-    ] = 1,
-    no_footer: Annotated[
-        bool,
-        typer.Option("--no-footer", help="Omit the report footer line."),
-    ] = False,
-    offline: Annotated[
-        bool,
-        typer.Option("--offline", help="Use the bundled price snapshot. Opens no socket."),
-    ] = False,
-) -> None:
-    """Write the Acme Support Bot sample and a SYNTHETIC DATA report. Local files only."""
-    if seed < 0:
-        typer.echo("error: --seed must be >= 0", err=True)
-        raise typer.Exit(code=EXIT_USAGE)
-    from tracetally.demo.generator import write_demo_files
-
-    try:
-        written = write_demo_files(out, seed=seed)
-    except OSError as exc:
-        typer.echo(f"error: could not write demo files: {exc}", err=True)
-        raise typer.Exit(code=EXIT_INPUT) from exc
-    _emit_report(
-        [written["jsonl"]],
-        format_name="jsonl",
-        endpoint_attr=None,
-        offline=offline,
-        pricing_config=None,
-        discount=None,
-        tier_map=written["tiers"],
-        config=None,
-        only=None,
-        skip=None,
-        strict=False,
-        out=out,
-        redact=False,
-        include_content=False,
-        footer=not no_footer,
-        synthetic=True,
-        demo_seed=seed,
-    )
-
-
 @app.command("readers")
 def readers_command() -> None:
     """List readers registered on the tracetally.readers entry-point group."""
@@ -564,6 +570,23 @@ def _emit_report(
     typer.echo(summary_text, nl=not summary_text.endswith("\n"))
     typer.echo(findings_text, nl=not findings_text.endswith("\n"))
     _exit_if_empty(written.analysis)
+
+
+def _print_run_summary(result: Analysis, out: Path) -> None:
+    summary = result.summary
+    typer.echo(
+        f"tracetally {__version__}  calls {summary.calls}  "
+        f"priced {summary.priced_calls}/{summary.calls}  "
+        f"{format_usd(summary.cost_usd)} {summary.currency}"
+    )
+    ranked = rank_findings(list(result.findings))
+    if not ranked:
+        typer.echo("No findings.")
+    for index, item in enumerate(ranked, start=1):
+        what_if = " (what-if)" if item.what_if else ""
+        typer.echo(f"{index}. {item.title}{what_if}  {cost_label(item, summary.currency)}")
+    typer.echo(f"report: {out}")
+    typer.echo(f"{AUDIT_CTA_TEXT}: {AUDIT_CTA_URL}")
 
 
 def _exit_if_empty(result: Analysis) -> None:

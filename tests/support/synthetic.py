@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Test import path for the demo generator."""
+"""Test import path for the planted-call factory."""
 
-from tracetally.demo.generator import (
+from tests.support.planted import (
     CANARY,
     CONTROL_ENDPOINT,
     PLANTED,
-    ROOT,
     calls,
     ground_truth_document,
     jsonl_text,
@@ -18,7 +17,6 @@ __all__ = [
     "CANARY",
     "CONTROL_ENDPOINT",
     "PLANTED",
-    "ROOT",
     "calls",
     "ground_truth_document",
     "jsonl_text",

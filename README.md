@@ -2,79 +2,65 @@
 
 Offline cost and reliability audit for LLM traces you already exported.
 
-Your LLM bill tells you the total. tracetally tells you why.
+Placeholder copy. PM will replace this page.
 
-This tree is the W4 milestone (`0.1.0.dev0`): it reads JSONL, OTLP/JSON,
-Langfuse, and OpenAI usage CSV exports, ranks savings and reliability
-findings, and writes `report.md`, `report.html`, and `findings.json`.
-A cost-only file says which checks it cannot run, and why.
+```bash
+pip install tracetally
+tracetally run traces.jsonl
+```
+
+That reads the files you pass, prices them, and writes `./tracetally-report/`
+(`findings.json`, `report.md`, `dashboard.html`). Open `dashboard.html` in a
+browser. It is one file: inline CSS, one inline script, no remote assets.
+
+Runs locally. Your data never leaves your machine. The only network request tracetally makes is a price-list download, which `--offline` turns off. No telemetry, no proxy, no LLM calls.
+
+With no PATH, `tracetally run` prints the usage and stops. Pointing it at a
+directory of traces with no arguments is a later release.
+
+`summary` and `analyze` stay as terminal-only commands. They are not aliases
+of `run`. `report` still writes `report.md`, `report.html`, and `findings.json`.
+`run` is the command that writes the dashboard.
 
 ## What it is not
 
-tracetally is not a proxy, gateway, router, SDK, or server. It does not sit
-in the request path, hold provider API keys, send telemetry, or fetch prices.
-The only I/O is the files you name and the directory you pass to `--out`.
-If the machine has no network, every command still runs.
+tracetally is not a proxy, gateway, router, middleware, SDK, or server. It does
+not sit in the request path, hold provider API keys, or send telemetry.
 
 ## Install
 
 Python 3.10 or newer.
 
 ```bash
-python -m pip install -e ".[dev]"
+pip install tracetally
 ```
 
-The published install (`pipx install tracetally`, `uv tool install tracetally`,
-or `pip install tracetally`) lands with the 0.1.0 release. Pushing the tag
-`v0.1.0` is what starts that publish. The package does not call the network
-at runtime.
+A checkout uses `python -m pip install -e ".[dev]"`. The version in this tree
+is `0.1.0.dev0` until the release commit.
 
-## Try it
+## Run
 
 ```bash
-tracetally demo
+tracetally run traces.jsonl other.json --offline --out ./tracetally-report
+tracetally run usage.csv --pricing-config ./tracetally.toml
 ```
 
-That writes a planted Acme Support Bot sample and a report under
-`./tracetally-demo/`. The terminal and the report header say **SYNTHETIC DATA**.
-The rows are not production traces and they are not a customer result.
-`--seed` labels the run. It does not redraw the rows, so the planted dollar
-amounts stay fixed.
+`--offline` skips the price-list download and uses the bundled snapshot.
+`--out` changes the report directory. `--pricing-config` points at a
+`tracetally.toml` of aliases, prices, discounts, and a static FX rate.
 
-Open `tracetally-demo/report.html` in a browser. The file is self-contained:
-inline CSS, inline SVG, no JavaScript. It does not load images, fonts, or
-scripts. The only `https` links are plain anchors (the project page and
-"validate with evals"). A browser does not fetch them until you click.
-
-```bash
-tracetally summary examples/synthetic_otel.json
-tracetally analyze examples/synthetic.jsonl --tier-map examples/tiers.example.yaml
-tracetally report examples/synthetic.jsonl --tier-map examples/tiers.example.yaml
-tracetally prices
-```
+Findings are ranked by estimated dollars saved, descending. A finding whose
+cost could not be estimated is labelled `unknown cost` and sorts last.
+A bad file prints a warning and the rest of the files still run. Exit 0 when
+the report is written.
 
 ## Summary
 
-Two synthetic Acme Support Bot exports are checked in. They are labelled
-synthetic on purpose. They are not production traces and they are not a
-customer result.
-
 ```bash
-tracetally summary examples/synthetic_otel.json
-tracetally summary examples/synthetic.jsonl --json
-tracetally summary examples/synthetic_langfuse.json
-tracetally summary examples/synthetic_openai_usage.csv
+tracetally summary traces.jsonl
+tracetally summary traces.jsonl --json --offline
 tracetally prices
 ```
-
-`examples/synthetic_otel.json` is an OTLP/JSON document. `examples/synthetic.jsonl`
-is one call per line. Both contain the same 235 calls: the original 31
-(20 `gpt-4o-mini` on `support.reply`, 5 `claude-sonnet-4-5` with one batch call,
-4 `gemini-2.5-flash`, 2 unpriced `acme-private-llm`) plus planted endpoints and
-a clean `support.control` endpoint. The OTLP file also has tool spans, which
-are not billed. `examples/ground_truth.json` lists the planted dollar ranges.
-`examples/synthetic_langfuse.json` and `examples/synthetic_openai_usage.csv`
-are small stand-ins for those export shapes. They are not real account exports.
 
 The text summary prints:
 
@@ -90,10 +76,10 @@ It is not printed.
 ## Analyze
 
 ```bash
-tracetally analyze examples/synthetic.jsonl --tier-map examples/tiers.example.yaml
-tracetally analyze examples/synthetic_otel.json --tier-map examples/tiers.example.yaml --json
-tracetally analyze examples/synthetic_langfuse.json
-tracetally analyze examples/synthetic_openai_usage.csv --json
+tracetally analyze traces.jsonl --tier-map tiers.yaml
+tracetally analyze traces.json --json --offline
+tracetally analyze observations.json
+tracetally analyze usage.csv --json
 ```
 
 Each check is a pure function and names the reader capabilities it needs.
@@ -123,9 +109,7 @@ Latency tails (p99 > 5× p50) and error rates (429 > 1%, 5xx > 0.5%) are
 findings with no dollars. If the reader is missing a capability,
 `observability_gap` lists the fields to start logging.
 
-The synthetic set plants one issue per dollar check. `support.control` is
-clean: analyze does not flag it. Prompt text is hashed at read. A canary
-string in the synthetic prompts does not appear in analyze output.
+Prompt text is hashed at read. It is not printed.
 
 An OpenAI usage CSV has no per-call rows, latency, trace tree, prompts, or
 errors. Summary prints cost-only mode (`n/a` latency, error rates not
@@ -136,20 +120,22 @@ Mixing a CSV with a trace file uses the intersection, which is cost-only.
 ## Report
 
 ```bash
-tracetally report examples/synthetic.jsonl --tier-map examples/tiers.example.yaml
-tracetally report examples/synthetic_openai_usage.csv --out ./csv-report --no-footer
-tracetally report examples/synthetic.jsonl --redact
-tracetally report examples/synthetic.jsonl --include-content
+tracetally run traces.jsonl --offline
+tracetally report traces.jsonl --tier-map tiers.yaml
+tracetally report usage.csv --out ./csv-report --no-footer
+tracetally report traces.jsonl --redact
+tracetally report traces.jsonl --include-content
 ```
 
-`report` runs the summary and the checks, prints both, and writes three files
-in `--out` (default `./tracetally-report/`):
+`run` writes three files in `--out` (default `./tracetally-report/`). `report`
+writes the same markdown and JSON plus an SVG report, and prints the summary:
 
 | File | What it is |
 |---|---|
-| `report.md` | The same audit in Markdown, for a diff or a ticket. |
-| `report.html` | One file. Inline CSS and inline SVG. No JavaScript. |
-| `findings.json` | `schema_version` 1. The public machine-readable contract. |
+| `report.md` | The audit in Markdown. Every copy ends with the audit call to action. |
+| `dashboard.html` | `run` only. One file. Data is in a JSON script. The page script uses `textContent`. |
+| `report.html` | `report` only. Inline CSS and inline SVG. No JavaScript. |
+| `findings.json` | `schema_version` 1. Price source, URL, date, sha256, currency, and fx_rate. |
 
 The HTML report has an executive summary (spend, top findings, low/mid/high
 savings), ranked finding cards (evidence, $/month, effort, quality risk,
@@ -172,23 +158,13 @@ characters of prompt text per call and prints up to two 500-character excerpts
 on each finding. It is not a full prompt export. `--redact` wins: the text is
 not kept, and the command says so.
 
-`--synthetic` adds the SYNTHETIC DATA banner. `tracetally demo` sets it.
+`--synthetic` adds the SYNTHETIC DATA banner on `report`.
 
-Exit codes for every command: `0` ok, `2` usage, `3` input or price-file error,
-`4` records were read but none could be priced. `report` still writes the
-files when the exit code is 4.
-
-## Demo
-
-```bash
-tracetally demo --out ./tracetally-demo --seed 1
-```
-
-Writes `synthetic.jsonl`, `synthetic_otel.json`, `tiers.yaml`,
-`ground_truth.json`, and the three report files. The report is built from the
-JSONL file plus the tier map, so the summary and every check, including the
-model-swap what-if, all run. `examples/ground_truth.json` lists the planted dollar ranges.
-`support.control` is the clean endpoint.
+Exit codes for `summary`, `analyze`, and `report`: `0` ok, `2` usage,
+`3` input or price-file error, `4` records were read but none could be priced.
+`report` still writes the files when the exit code is 4. `run` exits `0` when
+it has written the folder, including when a file was skipped with a warning,
+and `2` when no PATH was given.
 
 ## Other commands
 
@@ -324,9 +300,11 @@ marked estimate. Bedrock region prefixes and Vertex `@date` names are priced
 for the provider that billed.
 
 OpenAI and Gemini input counts include cache reads; those reads are subtracted
-once and priced at the cache rate. Anthropic input counts exclude cache reads
-and cache writes, so those are priced separately, and a cache write uses
-LiteLLM's `cache_creation_input_token_cost` when it is published. An export
+once and priced at the cache rate. OTel input counts include cache reads and
+cache writes for every provider, including Anthropic. JSONL and Langfuse
+Anthropic input counts exclude cache reads and cache writes, so those are
+priced separately, and a cache write uses LiteLLM's
+`cache_creation_input_token_cost` when it is published. An export
 with no cache fields is not given any. An
 over-200k rate applies to that request only. Batch, priority, and flex rates
 apply only when the export shows that tier. A billed cost in the export wins.
@@ -351,8 +329,9 @@ not printed, not written, and not sent anywhere unless you pass
 `--include-content`. `--redact` also hashes identifiers in the report, as
 described above.
 
-The command writes to the terminal and, for `report` and `demo`, to `--out`.
-There is no cache outside that directory, no update check, and no telemetry.
+The command writes to the terminal and, for `run` and `report`, to `--out`.
+There is no telemetry. The price-list cache is the only other file the tool
+writes, and `--offline` does not use it.
 
 ## Offline guarantee
 
@@ -368,6 +347,8 @@ A separate test parses `report.html` and fails if it contains a script, an
 image, a stylesheet link, or any `src` / `href` that would load a remote
 resource. The SVG `xmlns` is a namespace, not a fetch. The two allowed `https`
 anchors are the project page and the "validate with evals" link.
+`dashboard.html` is the one file with a script. Its CSP is `default-src 'none'`
+and allows that script by sha256, with no `unsafe-inline`.
 
 ## Development
 

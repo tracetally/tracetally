@@ -1,3 +1,0 @@
-start_time;line_item;amount_value;amount_currency;project_name;remark
-2026-10-02 00:00:00;gpt-4o-mini-2024-07-18, input;1.25;usd;Acme;ignored
-2026-10-02 00:00:00;not a model name;0.10;eur;Acme;bad-currency

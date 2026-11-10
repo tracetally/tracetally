@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Synthetic Acme Support Bot calls shared by the demo, the examples, and the tests.
+"""Runtime factory for the planted Acme Support Bot calls used by tests.
 
 The numbers are chosen so costs divide cleanly against the bundled price table.
 Planted endpoints each trigger one check. ``support.control`` is clean.
+Nothing here is checked in as a data file.
 """
 
 from __future__ import annotations
@@ -11,18 +12,6 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-
-def _repo_root() -> Path:
-    """Checkout root when this file sits in the source tree. Tests use it."""
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / "pyproject.toml").is_file() and (parent / "examples").is_dir():
-            return parent
-    return here.parents[3]
-
-
-ROOT = _repo_root()
 
 CANARY = "CANARY_PROMPT_DO_NOT_LEAK"
 # 3000 token-equivalents at the chars/4 estimate used only to bucket prefixes.
@@ -399,41 +388,9 @@ def ground_truth_document() -> dict[str, Any]:
     }
 
 
-def write_demo_files(directory: Path, *, seed: int) -> dict[str, Path]:
-    """Write the planted Acme Support Bot files used by ``tracetally demo``.
-
-    ``seed`` is recorded on ``ground_truth.json``. It does not redraw the rows,
-    so the planted dollar amounts stay the ones the tests check.
-    """
-    directory.mkdir(parents=True, exist_ok=True)
-    paths = {
-        "jsonl": directory / "synthetic.jsonl",
-        "otel": directory / "synthetic_otel.json",
-        "tiers": directory / "tiers.yaml",
-        "ground_truth": directory / "ground_truth.json",
-    }
-    paths["jsonl"].write_text(jsonl_text(), encoding="utf-8", newline="\n")
-    paths["otel"].write_text(
-        json.dumps(otel_document(), indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    paths["tiers"].write_text(tier_map_text(), encoding="utf-8", newline="\n")
-    truth = ground_truth_document()
-    truth["seed"] = seed
-    truth["notes"] = (
-        str(truth["notes"]) + " The seed labels the demo run. It does not redraw the planted rows."
-    )
-    paths["ground_truth"].write_text(
-        json.dumps(truth, indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    return paths
-
-
-def write_examples(root: Path | None = None) -> None:
-    target = root or (ROOT / "examples")
+def write_examples(root: Path) -> None:
+    """Write the planted exports into ``root``. Tests pass a temp directory."""
+    target = root
     target.mkdir(parents=True, exist_ok=True)
     (target / "synthetic.jsonl").write_text(jsonl_text(), encoding="utf-8")
     (target / "synthetic_otel.json").write_text(
@@ -545,7 +502,3 @@ def _kv(key: str, value: object) -> dict[str, Any]:
     else:
         wrapped = {"stringValue": str(value)}
     return {"key": key, "value": wrapped}
-
-
-if __name__ == "__main__":
-    write_examples()

@@ -160,9 +160,9 @@ def parse_pricing_toml(text: str, *, origin: str) -> PricingConfig:
         key: _discount(value, f"{origin}: discounts.{key}")
         for key, value in _string_table(document.get("discounts"), f"{origin}: discounts").items()
     }
-    prices = _prices(document.get("prices"), origin)
+    prices, price_warnings = _prices(document.get("prices"), origin)
     unknown = sorted(set(document) - _KNOWN_ROOT)
-    warnings = tuple(f"tracetally.toml: unknown key {key!r}" for key in unknown)
+    warnings = tuple(f"tracetally.toml: unknown key {key!r}" for key in unknown) + price_warnings
     return PricingConfig(
         currency=currency,
         fx_rate=fx_rate,
@@ -175,12 +175,35 @@ def parse_pricing_toml(text: str, *, origin: str) -> PricingConfig:
     )
 
 
-def _prices(raw: object, origin: str) -> dict[str, ModelOverride]:
+_KNOWN_PRICE_KEYS = frozenset(
+    {
+        "provider",
+        "input",
+        "output",
+        "cached_input",
+        "batch_input",
+        "batch_output",
+        "batch_cached_input",
+        "priority_input",
+        "priority_output",
+        "priority_cached_input",
+        "flex_input",
+        "flex_output",
+        "flex_cached_input",
+        "above_200k_input",
+        "above_200k_output",
+        "above_200k_cached_input",
+    }
+)
+
+
+def _prices(raw: object, origin: str) -> tuple[dict[str, ModelOverride], tuple[str, ...]]:
     if raw is None:
-        return {}
+        return {}, ()
     if not isinstance(raw, dict):
         raise PriceError(f"{origin}: prices must be a table")
     found: dict[str, ModelOverride] = {}
+    warnings: list[str] = []
     for key, spec in raw.items():
         model = str(key).strip()
         if not model or not isinstance(spec, dict):
@@ -188,6 +211,8 @@ def _prices(raw: object, origin: str) -> dict[str, ModelOverride]:
         provider = spec.get("provider", "")
         if not isinstance(provider, str):
             raise PriceError(f"{origin}: prices.{model}.provider must be a string")
+        for name in sorted(set(spec) - _KNOWN_PRICE_KEYS):
+            warnings.append(f"tracetally.toml: unknown key 'prices.{model}.{name}'")
         found[model] = ModelOverride(
             provider=provider,
             input=_money_field(spec, "input", f"{origin}: prices.{model}"),
@@ -210,7 +235,7 @@ def _prices(raw: object, origin: str) -> dict[str, ModelOverride]:
                 spec, "above_200k_cached_input", f"{origin}: prices.{model}"
             ),
         )
-    return found
+    return found, tuple(warnings)
 
 
 def _money_field(spec: dict[str, object], key: str, where: str) -> Decimal:
