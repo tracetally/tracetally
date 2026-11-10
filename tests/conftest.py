@@ -21,6 +21,17 @@ def _isolated_price_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 
 @pytest.fixture(autouse=True)
+def _no_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests must not open a local browser."""
+    import webbrowser
+
+    def blocked(*_args: object, **_kwargs: object) -> bool:
+        raise AssertionError("webbrowser.open must not run in tests")
+
+    monkeypatch.setattr(webbrowser, "open", blocked)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_price_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     """No test reaches the live price fetch. fetch.py tests call it directly."""
     import tracetally.pricing.source as price_source

@@ -125,7 +125,13 @@ def write_run(store: TraceStore, analysis: Analysis, options: ReportOptions) -> 
         ranked = shown.findings
     context = _context(shown, run_options, excerpts, content_in_report=content_in_report)
     markdown = _environment(autoescape=False).get_template("report.md.j2").render(context)
-    document = _document(shown, run_options, excerpts, content_in_report=content_in_report)
+    document = _document(
+        shown,
+        run_options,
+        excerpts,
+        content_in_report=content_in_report,
+        records_dropped=store.records_dropped,
+    )
     _annotate_run_document(document, shown.findings)
     html = render_dashboard(document)
     paths = _write_atomic_dir(
@@ -339,6 +345,7 @@ def _document(
     excerpts: dict[str, list[dict[str, str]]],
     *,
     content_in_report: bool,
+    records_dropped: int = 0,
 ) -> dict[str, Any]:
     summary = analysis.summary
     savings, what_ifs = _split_totals(analysis.findings)
@@ -390,6 +397,7 @@ def _document(
         skipped_checks=list(analysis.skipped),
         inputs=[_input_digest(item) for item in summary.inputs],
         warnings=list(summary.warnings),
+        records_dropped=records_dropped,
         content_excerpts=flat,
     )
     return result.model_dump(mode="json")

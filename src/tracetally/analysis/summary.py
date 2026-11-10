@@ -20,6 +20,7 @@ from tracetally.core.money import format_usd
 from tracetally.core.schema import Capability, SkippedCheck
 from tracetally.core.stats import percentiles_or_none, rate
 from tracetally.core.store import TraceStore
+from tracetally.core.terminal import terminal_safe
 from tracetally.pricing.table import PriceTable, request_size
 
 SUMMARY_SCHEMA_VERSION = 1
@@ -283,7 +284,7 @@ class Summary:
         cost_line = (
             f"tokens in {self.input_tokens}  cached {self.cached_input_tokens}  "
             f"out {self.output_tokens}  reasoning {self.reasoning_tokens}  "
-            f"cost {format_usd(self.cost_usd)} {self.currency}"
+            f"cost {format_usd(self.cost_usd)} {terminal_safe(self.currency)}"
         )
         if self.show_discount:
             listed = format_usd(self.list_cost_usd)
@@ -292,7 +293,8 @@ class Summary:
         console.print(cost_line)
         if self.fx_user_supplied:
             console.print(
-                f"currency {self.currency}  FX rate {self.fx_rate} was supplied by the user "
+                f"currency {terminal_safe(self.currency)}  FX rate {self.fx_rate} was supplied "
+                "by the user "
                 "and was not fetched"
             )
         if self.billed_cost_usd is not None or self.inferred_cost_usd is not None:
@@ -328,12 +330,12 @@ class Summary:
             console.print()
             console.print("Skipped checks")
             for item in self.skipped_checks:
-                console.print(f"- {item.check}: {item.reason}")
+                console.print(f"- {terminal_safe(item.check)}: {terminal_safe(item.reason)}")
         if self.warnings:
             console.print()
             console.print("Warnings")
             for warning in self.warnings:
-                console.print(f"- {warning}")
+                console.print(f"- {terminal_safe(warning)}")
         console.print()
         console.print(self.methodology)
         console.print(
@@ -776,7 +778,7 @@ def _model_table(groups: list[GroupSummary], *, latency_measured: bool, currency
         "Input",
         "Cached",
         "Output",
-        f"Cost {currency}",
+        f"Cost {terminal_safe(currency)}",
         "n",
         "p50",
         "p95",
@@ -788,8 +790,8 @@ def _model_table(groups: list[GroupSummary], *, latency_measured: bool, currency
     for group in groups:
         latency = group.latency()
         table.add_row(
-            group.provider,
-            group.model,
+            terminal_safe(group.provider),
+            terminal_safe(group.model),
             str(group.requests),
             str(group.input_tokens),
             str(group.cached_input_tokens),
@@ -814,7 +816,7 @@ def _endpoint_table(groups: list[GroupSummary], *, latency_measured: bool, curre
         "Requests",
         "Input",
         "Output",
-        f"Cost {currency}",
+        f"Cost {terminal_safe(currency)}",
         "n",
         "p50",
         "p95",
@@ -830,9 +832,9 @@ def _endpoint_table(groups: list[GroupSummary], *, latency_measured: bool, curre
     for group in groups:
         latency = group.latency()
         table.add_row(
-            group.endpoint or "(unknown)",
-            group.provider,
-            group.model,
+            terminal_safe(group.endpoint or "(unknown)"),
+            terminal_safe(group.provider),
+            terminal_safe(group.model),
             str(group.requests),
             str(group.input_tokens),
             str(group.output_tokens),

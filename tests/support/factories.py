@@ -402,6 +402,31 @@ def write_openai_usage_csv(directory: Path) -> Path:
     return _write(directory / "usage.csv", header + "\n" + "\n".join(rows) + "\n")
 
 
+def call_record(**overrides: object) -> dict[str, object]:
+    record: dict[str, object] = {
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "start_time": "2026-10-01T00:00:00Z",
+        "input_tokens": 10,
+        "output_tokens": 2,
+    }
+    record.update(overrides)
+    return record
+
+
+def write_jsonl_records(
+    directory: Path,
+    records: list[dict[str, object]],
+    name: str = "calls.jsonl",
+) -> Path:
+    lines = [json.dumps(record) for record in records]
+    return _write(directory / name, "\n".join(lines) + ("\n" if lines else ""))
+
+
+def write_unrecognized(directory: Path, name: str = "notes.jsonl") -> Path:
+    return _write(directory / name, "this is not an LLM export\n")
+
+
 def write_openai_costs_csv(directory: Path) -> Path:
     text = """\
 start_time;line_item;amount_value;amount_currency;project_name;remark
