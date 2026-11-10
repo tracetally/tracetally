@@ -165,6 +165,7 @@ def _call_from_object(obj: dict[str, Any], *, where: str, cfg: ReaderConfig) -> 
         model,
         has_cache=cached is not None or created is not None,
         explicit=explicit,
+        source="jsonl",
     )
     if accounting == "included" and cached is not None and cached > input_tokens:
         raise ValueError("cached_input_tokens: cached_input_tokens exceeds input_tokens")

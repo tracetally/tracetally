@@ -189,6 +189,7 @@ class RunResult(BaseModel):
     price_sha256: str = ""
     priced_share: str = ""
     currency: str = "USD"
+    fx_rate: str = "1"
     methodology: str = ""
     monthly_factor: str = "1"
     monthly_caveats: list[str] = Field(default_factory=list)

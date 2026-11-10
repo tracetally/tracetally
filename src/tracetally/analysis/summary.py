@@ -236,10 +236,20 @@ class Summary:
                 f"inferred {format_usd(self.inferred_cost_usd)}{gap}"
             )
         console.print()
-        console.print(_model_table(self.by_model, latency_measured=self.latency_measured))
+        console.print(
+            _model_table(
+                self.by_model,
+                latency_measured=self.latency_measured,
+                currency=self.currency,
+            )
+        )
         console.print()
         console.print(
-            _endpoint_table(self.by_endpoint_model, latency_measured=self.latency_measured)
+            _endpoint_table(
+                self.by_endpoint_model,
+                latency_measured=self.latency_measured,
+                currency=self.currency,
+            )
         )
         console.print()
         console.print(_error_line(self))
@@ -270,7 +280,7 @@ class Summary:
 def summarize(store: TraceStore, table: PriceTable) -> Summary:
     by_model: dict[tuple[str, ...], GroupSummary] = {}
     by_endpoint: dict[tuple[str, ...], GroupSummary] = {}
-    warnings = list(store.warnings)
+    warnings = list(table.warnings) + list(store.warnings)
     unpriced: dict[tuple[str, str], int] = {}
     unknown_cost: dict[tuple[str, str, str], int] = {}
     missing_tokens: dict[tuple[str, str], int] = {}
@@ -666,7 +676,7 @@ def _group_dict(group: GroupSummary, *, latency_measured: bool) -> dict[str, obj
     return payload
 
 
-def _model_table(groups: list[GroupSummary], *, latency_measured: bool) -> Table:
+def _model_table(groups: list[GroupSummary], *, latency_measured: bool, currency: str) -> Table:
     table = Table(title="By model", box=box.ASCII, show_lines=False)
     for column in (
         "Provider",
@@ -675,7 +685,7 @@ def _model_table(groups: list[GroupSummary], *, latency_measured: bool) -> Table
         "Input",
         "Cached",
         "Output",
-        "Cost USD",
+        f"Cost {currency}",
         "n",
         "p50",
         "p95",
@@ -704,7 +714,7 @@ def _model_table(groups: list[GroupSummary], *, latency_measured: bool) -> Table
     return table
 
 
-def _endpoint_table(groups: list[GroupSummary], *, latency_measured: bool) -> Table:
+def _endpoint_table(groups: list[GroupSummary], *, latency_measured: bool, currency: str) -> Table:
     table = Table(title="By endpoint x model", box=box.ASCII, show_lines=False)
     for column in (
         "Endpoint",
@@ -713,7 +723,7 @@ def _endpoint_table(groups: list[GroupSummary], *, latency_measured: bool) -> Ta
         "Requests",
         "Input",
         "Output",
-        "Cost USD",
+        f"Cost {currency}",
         "n",
         "p50",
         "p95",

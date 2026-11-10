@@ -13,8 +13,15 @@ from pathlib import Path
 
 import pytest
 
+import tracetally.pricing.fetch as fetch_mod
+import tracetally.pricing.source as source_mod
 from tracetally import __version__
-from tracetally.pricing.fetch import LITELLM_PRICES_URL, TIMEOUT_SECONDS, fetch_prices
+from tracetally.pricing.fetch import (
+    LITELLM_PRICES_URL,
+    MAX_BYTES,
+    TIMEOUT_SECONDS,
+    fetch_prices,
+)
 from tracetally.pricing.table import load_bundled, load_prices
 
 _CACHE_NAME = "model_prices_and_context_window.json"
@@ -39,8 +46,10 @@ class _Response:
         self._body = body
         self.status = status
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, size: int = -1) -> bytes:
+        if size is None or size < 0:
+            return self._body
+        return self._body[:size]
 
     def getcode(self) -> int:
         return self.status
@@ -84,6 +93,11 @@ def _patch_opener(
         captured["handlers"] = handlers
         return _Opener(_Response(body or b"") if error is None else None, error)
 
+    def blocked_urlopen(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("urlopen is not used; fetch tests stub the opener")
+
+    monkeypatch.setattr(urllib.request, "urlopen", blocked_urlopen)
+    monkeypatch.setattr(source_mod, "fetch_prices", fetch_mod.fetch_prices)
     monkeypatch.setattr(urllib.request, "build_opener", build)
 
 
@@ -213,3 +227,71 @@ def test_fresh_cache_is_used_without_a_fetch(
     price = table.resolve("openai", "from-cache")
     assert price is not None and price.input == Decimal("4")
     assert table.provenance.sha256
+
+
+def _nested(count: int) -> bytes:
+    return b"[" * count + b"]" * count
+
+
+def test_deeply_nested_fetch_body_falls_back(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(source_mod, "fetch_prices", lambda **_kwargs: _nested(100_000))
+    table = load_prices(offline=False, cache_path=tmp_path / "cache")
+    assert table.provenance.source == "bundled"
+    assert any("live price file was not used" in warning for warning in table.warnings)
+    assert table.resolve("openai", "gpt-4o-mini") is not None
+
+
+def test_deeply_nested_cache_is_removed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cache = tmp_path / "cache"
+    _write_cache(cache, _nested(100_000), datetime.now(timezone.utc))
+    cached = cache / _CACHE_NAME
+    assert cached.is_file()
+    table = load_prices(offline=False, cache_path=cache)
+    assert not cached.is_file()
+    assert table.provenance.source == "bundled"
+    assert any("removed" in warning for warning in table.warnings)
+
+
+def test_oversized_price_body_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _patch_opener(monkeypatch, body=b"x" * (MAX_BYTES + 1))
+    table = load_prices(offline=False, cache_path=tmp_path / "cache")
+    assert table.provenance.source == "bundled"
+    assert any("live price file was not used" in warning for warning in table.warnings)
+
+
+def test_invalid_utf8_price_body_falls_back(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(source_mod, "fetch_prices", lambda **_kwargs: b"\xff\xfe")
+    table = load_prices(offline=False, cache_path=tmp_path / "cache")
+    assert table.provenance.source == "bundled"
+    assert any("live price file was not used" in warning for warning in table.warnings)
+
+
+def test_one_malformed_model_entry_is_skipped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = {
+        "good": {
+            "litellm_provider": "openai",
+            "input_cost_per_token": 1e-6,
+            "output_cost_per_token": 0,
+        },
+        "bad": {
+            "litellm_provider": "openai",
+            "input_cost_per_token": "nope",
+            "output_cost_per_token": 0,
+        },
+    }
+    monkeypatch.setattr(
+        source_mod,
+        "fetch_prices",
+        lambda **_kwargs: json.dumps(payload).encode("utf-8"),
+    )
+    table = load_prices(offline=False, cache_path=tmp_path / "cache")
+    assert table.provenance.source == "live"
+    assert table.resolve("openai", "good") is not None
+    assert table.resolve("openai", "bad") is None
+    assert any("skipped 1 malformed price entry: bad" in warning for warning in table.warnings)

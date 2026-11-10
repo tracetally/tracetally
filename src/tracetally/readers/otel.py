@@ -266,9 +266,8 @@ def _span_from_otlp(
         provider,
         model,
         has_cache=cached is not None or created is not None,
+        source="otel",
     )
-    if accounting == "included" and cached is not None and cached > input_tokens:
-        raise ValueError("cached_input_tokens: cached_input_tokens exceeds input_tokens")
 
     parts = _content_parts(attrs)
     digest, prefixes = hash_content_parts(parts)

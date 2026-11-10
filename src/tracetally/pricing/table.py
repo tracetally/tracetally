@@ -169,6 +169,7 @@ class PriceTable:
     origin: str
     provenance: Provenance
     config: PricingConfig = field(default_factory=PricingConfig)
+    warnings: list[str] = field(default_factory=list)
     _catalog: Catalog = field(default_factory=dict)
 
     @property
@@ -278,14 +279,16 @@ def table_from_bytes(
 ) -> PriceTable:
     """Build a table from price JSON. Used by tests; not a network path."""
     chosen = config or PricingConfig()
+    parsed = parse_price_bytes(data)
     document = PriceDocument(
-        catalog=parse_price_bytes(data),
+        catalog=parsed.catalog,
         provenance=Provenance(
             source="bundled",
             url=LITELLM_PRICES_URL,
             retrieved_on=retrieved_on or date.today(),
             sha256=sha256_hex(data),
         ),
+        warnings=tuple(parsed.warnings),
     )
     return _build(document, chosen)
 
@@ -330,6 +333,7 @@ def _build(document: PriceDocument, config: PricingConfig) -> PriceTable:
         origin=document.provenance.source,
         provenance=document.provenance,
         config=config,
+        warnings=list(document.warnings) + list(config.warnings),
         _catalog=catalog,
     )
 
@@ -454,10 +458,17 @@ def _cache_buckets(
     write = max(cache_creation_tokens, 0)
     if cache_accounting == "absent":
         return max(input_tokens, 0), 0, 0, max(input_tokens, 0)
+    total = max(input_tokens, 0)
+    if cache_accounting == "embedded":
+        # OTel: both the cache read and the cache write sit inside input_tokens.
+        write = min(write, total)
+        remaining = total - write
+        read = min(read, remaining)
+        return remaining - read, read, write, total
     if cache_accounting == "included":
-        read = min(read, max(input_tokens, 0))
-        return max(input_tokens, 0) - read, read, write, max(input_tokens, 0) + write
-    return max(input_tokens, 0), read, write, max(input_tokens, 0) + read + write
+        read = min(read, total)
+        return total - read, read, write, total + write
+    return total, read, write, total + read + write
 
 
 def _quote(

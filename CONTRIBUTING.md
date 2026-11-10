@@ -25,10 +25,13 @@ or `subprocess`.
 
 ## Prices
 
-Prices live in `src/tracetally/pricing/data/prices-2026-10.yaml`. Every price
-needs `source_url` and `retrieved_on`. Do not guess a price for a model that
-is not on the publisher's page. Unknown models stay unpriced at runtime.
-Updating the table is a pull request, never a network call from the CLI.
+The bundled snapshot is
+`src/tracetally/pricing/data/model_prices_and_context_window.json`, a copy of
+LiteLLM's price file. The only network call is the GET in
+`src/tracetally/pricing/fetch.py`. `--offline` uses that snapshot and opens
+no socket. Do not guess a price for a model the snapshot does not list.
+Unknown models stay unpriced at runtime. User overrides belong in
+`tracetally.toml`.
 
 ## Reports
 

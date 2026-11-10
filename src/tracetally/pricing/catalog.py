@@ -59,6 +59,12 @@ class CatalogEntry:
 Catalog = dict[str, CatalogEntry]
 
 
+@dataclass(frozen=True)
+class ParsedPrices:
+    catalog: Catalog
+    warnings: list[str]
+
+
 def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -71,7 +77,7 @@ def bundled_bytes() -> bytes:
         raise PriceError(f"bundled price snapshot {BUNDLED_NAME} is not packaged") from exc
 
 
-def parse_price_bytes(data: bytes) -> Catalog:
+def parse_price_bytes(data: bytes) -> ParsedPrices:
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -80,28 +86,38 @@ def parse_price_bytes(data: bytes) -> Catalog:
         loaded = json.loads(text)
     except json.JSONDecodeError as exc:
         raise PriceError(f"price file is not valid JSON ({exc.msg})") from exc
+    except RecursionError as exc:
+        raise PriceError("price file is nested too deeply") from exc
     return parse_price_document(loaded)
 
 
-def parse_price_document(loaded: object) -> Catalog:
+def parse_price_document(loaded: object) -> ParsedPrices:
     if not isinstance(loaded, dict):
         raise PriceError("price file schema changed: expected a JSON object of models")
     catalog: Catalog = {}
-    usable = 0
+    skipped: list[str] = []
     for key, raw in loaded.items():
         name = str(key)
         if name in _SKIP_KEYS:
             continue
-        if not isinstance(raw, dict):
-            raise PriceError("price file schema changed: model entries must be objects")
-        entry = _parse_entry(name, raw)
+        try:
+            if not isinstance(raw, dict):
+                raise PriceError("model entry must be an object")
+            entry = _parse_entry(name, raw)
+        except Exception:
+            skipped.append(name)
+            continue
         if entry is None:
             continue
         catalog[name] = entry
-        usable += 1
-    if usable < 1:
+    warnings: list[str] = []
+    if skipped:
+        shown = ", ".join(skipped[:8])
+        noun = "entry" if len(skipped) == 1 else "entries"
+        warnings.append(f"skipped {len(skipped)} malformed price {noun}: {shown}")
+    if not catalog:
         raise PriceError("price file schema changed: no model prices found")
-    return catalog
+    return ParsedPrices(catalog=catalog, warnings=warnings)
 
 
 def _parse_entry(key: str, raw: dict[str, object]) -> CatalogEntry | None:

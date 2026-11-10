@@ -308,6 +308,10 @@ def demo_command(
         bool,
         typer.Option("--no-footer", help="Omit the report footer line."),
     ] = False,
+    offline: Annotated[
+        bool,
+        typer.Option("--offline", help="Use the bundled price snapshot. Opens no socket."),
+    ] = False,
 ) -> None:
     """Write the Acme Support Bot sample and a SYNTHETIC DATA report. Local files only."""
     if seed < 0:
@@ -324,7 +328,7 @@ def demo_command(
         [written["jsonl"]],
         format_name="jsonl",
         endpoint_attr=None,
-        offline=False,
+        offline=offline,
         pricing_config=None,
         discount=None,
         tier_map=written["tiers"],

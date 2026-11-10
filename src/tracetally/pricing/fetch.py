@@ -18,6 +18,9 @@ LITELLM_PRICES_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 )
 TIMEOUT_SECONDS = 10.0
+# The bundled LiteLLM snapshot is about 3.5 MB. 32 MB leaves room for that
+# file to grow and still rejects a response large enough to exhaust memory.
+MAX_BYTES = 32 * 1024 * 1024
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -56,7 +59,9 @@ def fetch_prices(*, timeout: float = TIMEOUT_SECONDS) -> bytes:
                 status = response.getcode()
             if status != 200:
                 raise PriceError(f"price host returned {status}")
-            body = response.read()
+            body = response.read(MAX_BYTES + 1)
+            if len(body) > MAX_BYTES:
+                raise PriceError(f"price file is larger than {MAX_BYTES} bytes")
     except PriceError:
         raise
     except urllib.error.HTTPError as exc:

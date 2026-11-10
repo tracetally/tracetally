@@ -3,15 +3,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
-from dataclasses import dataclass
+import tempfile
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from tracetally.core.errors import PriceError
 from tracetally.pricing.catalog import (
     BUNDLED_SNAPSHOT_DATE,
     Catalog,
@@ -38,6 +39,7 @@ class Provenance:
 class PriceDocument:
     catalog: Catalog
     provenance: Provenance
+    warnings: tuple[str, ...] = ()
 
 
 def cache_dir() -> Path:
@@ -66,44 +68,55 @@ def acquire_prices(*, offline: bool, cache_path: Path | None = None) -> PriceDoc
     cached = directory / _CACHE_NAME
     if offline:
         return _bundled()
-    fresh = _read_cache(cached, fresh_only=True)
+    notes: list[str] = []
+    fresh = _read_cache(cached, fresh_only=True, notes=notes)
     if fresh is not None:
-        return fresh
+        return _note(fresh, notes)
     try:
         body = fetch_prices()
-        catalog = parse_price_bytes(body)
-    except (PriceError, OSError, TimeoutError, ValueError):
-        stale = _read_cache(cached, fresh_only=False)
+        parsed = parse_price_bytes(body)
+    except Exception as exc:
+        notes.append(f"live price file was not used ({type(exc).__name__})")
+        stale = _read_cache(cached, fresh_only=False, notes=notes)
         if stale is not None:
-            return stale
-        return _bundled()
+            return _note(stale, notes)
+        return _note(_bundled(), notes)
     _write_cache(cached, body)
     return PriceDocument(
-        catalog=catalog,
+        catalog=parsed.catalog,
         provenance=Provenance(
             source="live",
             url=LITELLM_PRICES_URL,
             retrieved_on=datetime.now(timezone.utc).date(),
             sha256=sha256_hex(body),
         ),
+        warnings=tuple(notes) + tuple(parsed.warnings),
     )
 
 
 @lru_cache(maxsize=1)
 def _bundled() -> PriceDocument:
     body = bundled_bytes()
+    parsed = parse_price_bytes(body)
     return PriceDocument(
-        catalog=parse_price_bytes(body),
+        catalog=parsed.catalog,
         provenance=Provenance(
             source="bundled",
             url=LITELLM_PRICES_URL,
             retrieved_on=BUNDLED_SNAPSHOT_DATE,
             sha256=sha256_hex(body),
         ),
+        warnings=tuple(parsed.warnings),
     )
 
 
-def _read_cache(path: Path, *, fresh_only: bool) -> PriceDocument | None:
+def _note(document: PriceDocument, notes: list[str]) -> PriceDocument:
+    if not notes:
+        return document
+    return replace(document, warnings=tuple(notes) + tuple(document.warnings))
+
+
+def _read_cache(path: Path, *, fresh_only: bool, notes: list[str]) -> PriceDocument | None:
     if not path.is_file():
         return None
     fetched_on = _fetched_on(path)
@@ -114,17 +127,20 @@ def _read_cache(path: Path, *, fresh_only: bool) -> PriceDocument | None:
         return None
     try:
         body = path.read_bytes()
-        catalog = parse_price_bytes(body)
-    except (OSError, PriceError, UnicodeError, ValueError):
+        parsed = parse_price_bytes(body)
+    except Exception as exc:
+        notes.append(f"price cache was unreadable and was removed ({type(exc).__name__})")
+        _discard_cache(path)
         return None
     return PriceDocument(
-        catalog=catalog,
+        catalog=parsed.catalog,
         provenance=Provenance(
             source="cache",
             url=LITELLM_PRICES_URL,
             retrieved_on=fetched_on.date(),
             sha256=sha256_hex(body),
         ),
+        warnings=tuple(parsed.warnings),
     )
 
 
@@ -165,13 +181,33 @@ def _write_cache(path: Path, body: bytes) -> None:
         return
 
 
+def _discard_cache(path: Path) -> None:
+    for candidate in (path, _meta_path(path)):
+        try:
+            candidate.unlink()
+        except OSError:
+            continue
+
+
 def _atomic_write(path: Path, body: bytes) -> None:
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    with temporary.open("wb") as handle:
-        handle.write(body)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    """Write ``body`` via a unique temp file in the same directory, then replace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+        raise
 
 
 def _meta_path(path: Path) -> Path:

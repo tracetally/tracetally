@@ -75,6 +75,7 @@ class PricingConfig:
     run_discount: Decimal | None = None
     origin: str | None = None
     fx_user_supplied: bool = False
+    warnings: tuple[str, ...] = ()
 
     @property
     def active(self) -> bool:
@@ -110,6 +111,7 @@ class PricingConfig:
             run_discount=rate,
             origin=self.origin,
             fx_user_supplied=self.fx_user_supplied,
+            warnings=self.warnings,
         )
 
 
@@ -136,6 +138,9 @@ def load_pricing_config(path: Path | None) -> PricingConfig:
         raise PriceError(f"{chosen}: {exc}") from exc
 
 
+_KNOWN_ROOT = frozenset({"currency", "fx_rate", "aliases", "discounts", "prices"})
+
+
 def parse_pricing_toml(text: str, *, origin: str) -> PricingConfig:
     document = _parse_toml(text, origin)
     currency = "USD"
@@ -156,6 +161,8 @@ def parse_pricing_toml(text: str, *, origin: str) -> PricingConfig:
         for key, value in _string_table(document.get("discounts"), f"{origin}: discounts").items()
     }
     prices = _prices(document.get("prices"), origin)
+    unknown = sorted(set(document) - _KNOWN_ROOT)
+    warnings = tuple(f"tracetally.toml: unknown key {key!r}" for key in unknown)
     return PricingConfig(
         currency=currency,
         fx_rate=fx_rate,
@@ -164,6 +171,7 @@ def parse_pricing_toml(text: str, *, origin: str) -> PricingConfig:
         discounts=discounts,
         origin=origin,
         fx_user_supplied=fx_user_supplied,
+        warnings=warnings,
     )
 
 

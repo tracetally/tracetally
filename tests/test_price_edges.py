@@ -510,6 +510,208 @@ def test_discount_below_one_and_fx_above_zero(tmp_path: Path) -> None:
     assert "EUR" in result.to_text()
 
 
+def _otel_span(
+    path: Path,
+    *,
+    provider: str,
+    model: str,
+    input_tokens: int,
+    cached: int,
+    created: int,
+) -> None:
+    def attr(key: str, value: object, kind: str) -> dict[str, object]:
+        if kind == "int":
+            return {"key": key, "value": {"intValue": str(value)}}
+        return {"key": key, "value": {"stringValue": value}}
+
+    document = {
+        "resourceSpans": [
+            {
+                "scopeSpans": [
+                    {
+                        "spans": [
+                            {
+                                "traceId": "t",
+                                "spanId": "s",
+                                "name": "chat",
+                                "startTimeUnixNano": "1760000000000000000",
+                                "endTimeUnixNano": "1760000000050000000",
+                                "attributes": [
+                                    attr("gen_ai.provider.name", provider, "str"),
+                                    attr("gen_ai.response.model", model, "str"),
+                                    attr("gen_ai.usage.input_tokens", input_tokens, "int"),
+                                    attr("gen_ai.usage.output_tokens", 0, "int"),
+                                    attr("gen_ai.usage.cache_read.input_tokens", cached, "int"),
+                                    attr(
+                                        "gen_ai.usage.cache_creation.input_tokens",
+                                        created,
+                                        "int",
+                                    ),
+                                ],
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+
+def test_otel_anthropic_cache_is_inside_input_tokens(tmp_path: Path) -> None:
+    from tracetally.pricing.table import load_bundled
+
+    table = load_bundled()
+    price = table.resolve("anthropic", "claude-sonnet-4-5")
+    assert price is not None
+    expected, _applied = price.cost(
+        input_tokens=1000,
+        output_tokens=0,
+        cached_input_tokens=400,
+        cache_creation_tokens=100,
+        cache_accounting="separate",
+    )
+    # Quality's repro: 1500 OTel input tokens are 1000 fresh + 400 read + 100 write.
+    assert expected == Decimal("0.003495")
+    path = tmp_path / "otel.json"
+    _otel_span(
+        path,
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        input_tokens=1500,
+        cached=400,
+        created=100,
+    )
+    store = load_paths([path], ReaderConfig())
+    assert store.cache_accounting[0] == "embedded"
+    assert int(store.input_tokens[0]) == 1500
+    assert summarize(store, table).cost_usd == expected
+
+
+def test_otel_bedrock_anthropic_cache_is_inside_input_tokens(tmp_path: Path) -> None:
+    from tracetally.pricing.table import load_bundled
+
+    table = load_bundled()
+    model = "anthropic.claude-3-5-haiku-20241022-v1:0"
+    price = table.resolve("aws.bedrock", model)
+    assert price is not None
+    expected, _applied = price.cost(
+        input_tokens=1000,
+        output_tokens=0,
+        cached_input_tokens=400,
+        cache_creation_tokens=100,
+        cache_accounting="separate",
+    )
+    path = tmp_path / "bedrock.json"
+    _otel_span(
+        path,
+        provider="aws.bedrock",
+        model=model,
+        input_tokens=1500,
+        cached=400,
+        created=100,
+    )
+    store = load_paths([path], ReaderConfig())
+    assert store.cache_accounting[0] == "embedded"
+    assert summarize(store, table).cost_usd == expected
+
+
+def test_otel_provider_aliases_are_priced(tmp_path: Path) -> None:
+    prices = _price_file(
+        tmp_path,
+        {
+            "gemini-2.5-flash": _model("vertex_ai", "2", "0"),
+            "gpt-4o": _model("azure", "3", "0"),
+            "grok-2": _model("xai", "4", "0"),
+        },
+    )
+    table = table_from_bytes(prices.read_bytes())
+    cases = (
+        ("gcp.vertex_ai", "gemini-2.5-flash", Decimal("2")),
+        ("azure.ai.inference", "gpt-4o", Decimal("3")),
+        ("x_ai", "grok-2", Decimal("4")),
+    )
+    for provider, model, amount in cases:
+        path = tmp_path / f"{provider}.jsonl"
+        path.write_text(
+            json.dumps(_call(model, provider=provider, input_tokens=1_000_000)) + "\n",
+            encoding="utf-8",
+        )
+        result = summarize(load_paths([path], ReaderConfig()), table)
+        assert result.cost_usd == amount
+
+
+def test_openai_compatible_providers_include_cached_tokens(tmp_path: Path) -> None:
+    prices = _price_file(
+        tmp_path,
+        {"chat": _model("deepseek", "1", "0", cache_read_input_token_cost=_per_token("0.25"))},
+    )
+    path = _jsonl(
+        tmp_path,
+        [
+            _call(
+                "chat",
+                provider="deepseek",
+                input_tokens=1000,
+                cached_input_tokens=400,
+                output_tokens=0,
+            )
+        ],
+    )
+    store = load_paths([path], ReaderConfig())
+    assert store.cache_accounting[0] == "included"
+    assert _summarize(path, prices).cost_usd == Decimal("0.0007")
+
+
+def test_unknown_toml_key_is_named(tmp_path: Path) -> None:
+    prices = _price_file(tmp_path, {"gpt-4o": _model("openai", "1", "0")})
+    config = tmp_path / "tracetally.toml"
+    config.write_text('surprise = "1"\ncurrency = "USD"\n', encoding="utf-8")
+    path = _jsonl(tmp_path, [_call("gpt-4o", input_tokens=1)])
+    result = _summarize(path, prices, config=config)
+    assert any("unknown key 'surprise'" in warning for warning in result.warnings)
+
+
+def test_currency_header_and_findings_record_fx(tmp_path: Path) -> None:
+    from datetime import datetime, timezone
+
+    from tracetally.analysis.engine import analyze
+    from tracetally.report.render import ReportOptions, write_report
+
+    prices = _price_file(tmp_path, {"gpt-4o": _model("openai", "2", "0")})
+    config = tmp_path / "tracetally.toml"
+    config.write_text('currency = "EUR"\nfx_rate = "0.5"\n', encoding="utf-8")
+    path = _jsonl(tmp_path, [_call("gpt-4o")])
+    table = table_from_bytes(prices.read_bytes(), config=load_pricing_config(config))
+    store = load_paths([path], ReaderConfig())
+    summary = summarize(store, table)
+    assert "Cost EUR" in summary.to_text()
+    written = write_report(
+        store,
+        analyze(store, table),
+        ReportOptions(
+            out=tmp_path / "out",
+            redact=False,
+            include_content=False,
+            content_requested=False,
+            footer=False,
+            synthetic=False,
+            demo_seed=None,
+            generated_at=datetime(2026, 11, 10, tzinfo=timezone.utc),
+        ),
+    )
+    markdown = written.markdown.read_text(encoding="utf-8")
+    html = written.html.read_text(encoding="utf-8")
+    lines = markdown.splitlines()
+    assert any(line.startswith("- Observed spend:") for line in lines)
+    assert any(line.startswith("- Billed:") for line in lines)
+    assert "Cost EUR" in markdown
+    assert "Cost EUR" in html
+    findings = json.loads(written.findings.read_text(encoding="utf-8"))
+    assert findings["currency"] == "EUR"
+    assert findings["fx_rate"] == "0.5"
+
+
 def test_prices_flag_is_not_in_readme_docs_or_help() -> None:
     from typer.testing import CliRunner
 

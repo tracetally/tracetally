@@ -222,6 +222,7 @@ def _document(
         price_sha256=summary.price_sha256,
         priced_share=summary.priced_share,
         currency=summary.currency,
+        fx_rate=summary.fx_rate,
         methodology="\n\n".join(
             _methodology(analysis, options, content_in_report=content_in_report)
         ),

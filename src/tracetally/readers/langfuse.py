@@ -419,6 +419,7 @@ class LangfuseReader(BaseReader):
             provider,
             model,
             has_cache=cached is not None or created is not None,
+            source="langfuse",
         )
         return LLMCall.model_construct(
             source="langfuse",
