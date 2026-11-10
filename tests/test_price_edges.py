@@ -217,7 +217,7 @@ def test_vertex_at_date_uses_billed_provider(tmp_path: Path) -> None:
     assert result.by_model[0].price_label == "approx."
 
 
-def test_openai_cached_tokens_are_subtracted_before_input_price(tmp_path: Path) -> None:
+def test_openai_cached_tokens_are_a_subset_of_input(tmp_path: Path) -> None:
     prices = _price_file(
         tmp_path,
         {
@@ -234,8 +234,96 @@ def test_openai_cached_tokens_are_subtracted_before_input_price(tmp_path: Path) 
         [_call("gpt-4o", input_tokens=1000, cached_input_tokens=400, output_tokens=100)],
     )
     result = _summarize(path, prices)
-    # 600 uncached at $2, 400 cached at $0.50, 100 output at $4, per 1M tokens.
+    store = load_paths([path], ReaderConfig())
+    # The export count is left intact. 600 uncached at $2, 400 cached at $0.50,
+    # 100 output at $4, per 1M tokens. The cache read is subtracted once.
+    assert int(store.input_tokens[0]) == 1000
+    assert store.cache_accounting[0] == "included"
     assert result.cost_usd == Decimal("0.0018")
+
+
+def test_anthropic_cache_read_and_write_are_separate(tmp_path: Path) -> None:
+    prices = _price_file(
+        tmp_path,
+        {
+            "claude-sonnet": _model(
+                "anthropic",
+                "3",
+                "15",
+                cache_read_input_token_cost=_per_token("0.30"),
+                cache_creation_input_token_cost=_per_token("3.75"),
+            )
+        },
+    )
+    path = _jsonl(
+        tmp_path,
+        [
+            _call(
+                "claude-sonnet",
+                provider="anthropic",
+                input_tokens=1000,
+                cached_input_tokens=400,
+                cache_creation_input_tokens=100,
+                output_tokens=0,
+            )
+        ],
+    )
+    store = load_paths([path], ReaderConfig())
+    assert int(store.input_tokens[0]) == 1000
+    assert int(store.cached_input_tokens[0]) == 400
+    assert int(store.cache_creation_tokens[0]) == 100
+    assert store.cache_accounting[0] == "separate"
+    result = _summarize(path, prices)
+    # 1000 at $3, 400 reads at $0.30, 100 writes at $3.75, per 1M. Not subtracted.
+    assert result.cost_usd == Decimal("0.003495")
+
+    observed = tmp_path / "anthropic.json"
+    observed.write_text(
+        json.dumps(
+            {
+                "id": "g1",
+                "trace_id": "t1",
+                "type": "GENERATION",
+                "start_time": "2026-10-01T00:00:00Z",
+                "model": "claude-sonnet",
+                "metadata": {"provider": "anthropic"},
+                "usage_details": {
+                    "input": 1000,
+                    "output": 0,
+                    "cache_read_input_tokens": 400,
+                    "cache_creation_input_tokens": 100,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    langfuse = load_paths([observed], ReaderConfig(format_name="langfuse"))
+    assert int(langfuse.input_tokens[0]) == 1000
+    assert langfuse.cache_accounting[0] == "separate"
+    assert summarize(langfuse, table_from_bytes(prices.read_bytes())).cost_usd == Decimal(
+        "0.003495"
+    )
+
+
+def test_absent_cache_fields_are_not_invented(tmp_path: Path) -> None:
+    prices = _price_file(
+        tmp_path,
+        {
+            "gpt-4o": _model(
+                "openai",
+                "2",
+                "4",
+                cache_read_input_token_cost=_per_token("0.5"),
+            )
+        },
+    )
+    path = _jsonl(tmp_path, [_call("gpt-4o", input_tokens=1000, output_tokens=0)])
+    store = load_paths([path], ReaderConfig())
+    assert store.cache_accounting[0] == "absent"
+    assert int(store.cached_input_tokens[0]) == 0
+    result = _summarize(path, prices)
+    # The whole input is priced at $2 per 1M. The published cache rate is not applied.
+    assert result.cost_usd == Decimal("0.002")
 
 
 def test_over_200k_tier_is_per_request(tmp_path: Path) -> None:

@@ -323,7 +323,11 @@ ids use a listed fine-tune price when one exists, otherwise the base model
 marked estimate. Bedrock region prefixes and Vertex `@date` names are priced
 for the provider that billed.
 
-Cached tokens are subtracted from input and priced at the cache rate. An
+OpenAI and Gemini input counts include cache reads; those reads are subtracted
+once and priced at the cache rate. Anthropic input counts exclude cache reads
+and cache writes, so those are priced separately, and a cache write uses
+LiteLLM's `cache_creation_input_token_cost` when it is published. An export
+with no cache fields is not given any. An
 over-200k rate applies to that request only. Batch, priority, and flex rates
 apply only when the export shows that tier. A billed cost in the export wins.
 Missing token counts are not filled in. A zero list price (including

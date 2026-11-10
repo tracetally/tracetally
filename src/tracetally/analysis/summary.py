@@ -25,8 +25,12 @@ SUMMARY_SCHEMA_VERSION = 1
 
 METHODOLOGY = (
     "Costs are list prices per 1M tokens from the LiteLLM price file. "
-    "Cached tokens are a subset of input tokens and are priced at the cache rate; "
-    "the remainder is priced at the input rate. "
+    "OpenAI and Gemini input counts include cache reads. Those reads are priced "
+    "at the cache rate and subtracted from input once. "
+    "Anthropic input counts exclude cache reads and cache writes. Those are "
+    "priced separately, and a cache write uses the published creation rate. "
+    "With no cache fields, input is priced at the input rate and no cache "
+    "tokens are invented. "
     "The over-200k-token rate applies per request when that request's input tokens "
     "exceed 200000 and the file publishes an above-200k rate. "
     "Batch, priority, and flex rates apply only when the export shows that tier. "
@@ -246,6 +250,7 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
     unpriced: dict[tuple[str, str], int] = {}
     unknown_cost: dict[tuple[str, str, str], int] = {}
     missing_tokens: dict[tuple[str, str], int] = {}
+    missing_creation: dict[tuple[str, str], int] = {}
     billed_only: dict[tuple[str, str], int] = {}
     caveats: set[str] = set()
     missing_batch: set[str] = set()
@@ -281,14 +286,18 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cached_input_tokens=cached,
+                cache_creation_tokens=int(store.cache_creation_tokens[index]),
+                cache_accounting=store.cache_accounting[index],
                 is_batch=bool(store.is_batch[index]),
                 tier=store.service_tier[index],
             )
-            if price.discount:
+            if price.discount and inferred is not None:
                 list_cost = price.list_cost(
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     cached_input_tokens=cached,
+                    cache_creation_tokens=int(store.cache_creation_tokens[index]),
+                    cache_accounting=store.cache_accounting[index],
                     is_batch=bool(store.is_batch[index]),
                     tier=store.service_tier[index],
                 )
@@ -317,7 +326,9 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
         else:
             cost = None
             unpriced_calls += 1
-            if decision.status == "cost_unknown":
+            if price is not None and int(store.cache_creation_tokens[index]) > 0:
+                missing_creation[(provider, model)] = missing_creation.get((provider, model), 0) + 1
+            elif decision.status == "cost_unknown":
                 key = (provider, model, decision.reason or "cost unknown")
                 unknown_cost[key] = unknown_cost.get(key, 0) + 1
             else:
@@ -364,6 +375,12 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
     for (provider, model, reason), count in sorted(unknown_cost.items()):
         noun = "call" if count == 1 else "calls"
         warnings.append(f"cost unknown {provider}/{model} ({count} {noun}); {reason}")
+    for (provider, model), count in sorted(missing_creation.items()):
+        noun = "call" if count == 1 else "calls"
+        warnings.append(
+            f"cost unknown {provider}/{model} ({count} {noun}); "
+            "cache write tokens have no published cache_creation rate"
+        )
     for (provider, model), count in sorted(missing_tokens.items()):
         noun = "call" if count == 1 else "calls"
         warnings.append(

@@ -27,6 +27,7 @@ from tracetally.config import (
     load_check_params,
     load_tier_map,
 )
+from tracetally.core.cache import cache_accounting
 from tracetally.core.errors import UsageError
 from tracetally.core.schema import Capability, LLMCall, Status
 from tracetally.core.store import TraceStore
@@ -460,4 +461,13 @@ def _llm(**overrides: object) -> LLMCall:
         "attrs": {},
     }
     fields.update(overrides)
+    if "cache_accounting" not in fields:
+        cached = fields.get("cached_input_tokens")
+        created = fields.get("cache_creation_tokens")
+        has_cache = cached not in (None, 0) or created not in (None, 0)
+        fields["cache_accounting"] = cache_accounting(
+            str(fields["provider"]),
+            str(fields["model"]),
+            has_cache=bool(has_cache),
+        )
     return LLMCall.model_construct(**fields)  # type: ignore[arg-type]

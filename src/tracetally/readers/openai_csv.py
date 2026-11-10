@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from tracetally.config import ReaderConfig
+from tracetally.core.cache import ABSENT, INCLUDED
 from tracetally.core.schema import Capability, LLMCall, Span, Status
 from tracetally.readers.base import BaseReader
 from tracetally.readers.csvutil import normalize_key, open_csv, split_header
@@ -226,6 +227,8 @@ class OpenAICsvReader(BaseReader):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_input_tokens=cached,
+            cache_creation_tokens=None,
+            cache_accounting=INCLUDED if cached is not None else ABSENT,
             reasoning_tokens=reasoning,
             request_count=request_count,
             status=Status.OK,

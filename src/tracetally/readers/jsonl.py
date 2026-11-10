@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from tracetally.config import ReaderConfig
+from tracetally.core.cache import cache_accounting
 from tracetally.core.hashing import hash_content_parts, retained_content
 from tracetally.core.schema import Capability, LLMCall, Span, SpanKind
 from tracetally.readers.base import BaseReader
@@ -154,8 +155,18 @@ def _call_from_object(obj: dict[str, Any], *, where: str, cfg: ReaderConfig) -> 
     input_tokens = parse_int(obj.get("input_tokens"), field="input_tokens")
     output_tokens = parse_int(obj.get("output_tokens"), field="output_tokens")
     cached = parse_optional_int(obj.get("cached_input_tokens"), field="cached_input_tokens")
+    created = parse_optional_int(
+        obj.get("cache_creation_input_tokens"), field="cache_creation_input_tokens"
+    )
     reasoning = parse_optional_int(obj.get("reasoning_tokens"), field="reasoning_tokens")
-    if cached is not None and cached > input_tokens:
+    explicit = _optional_str(obj.get("cache_accounting"))
+    accounting = cache_accounting(
+        (_optional_str(obj.get("provider")) or "unknown"),
+        model,
+        has_cache=cached is not None or created is not None,
+        explicit=explicit,
+    )
+    if accounting == "included" and cached is not None and cached > input_tokens:
         raise ValueError("cached_input_tokens: cached_input_tokens exceeds input_tokens")
 
     http_status = parse_optional_int(obj.get("http_status"), field="http_status")
@@ -189,6 +200,8 @@ def _call_from_object(obj: dict[str, Any], *, where: str, cfg: ReaderConfig) -> 
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cached_input_tokens=cached,
+        cache_creation_tokens=created,
+        cache_accounting=accounting,
         reasoning_tokens=reasoning,
         request_count=request_count,
         status=status,

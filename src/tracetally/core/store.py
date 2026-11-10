@@ -55,6 +55,8 @@ class TraceStore:
     input_tokens: array[int] = field(default_factory=lambda: array("q"))
     output_tokens: array[int] = field(default_factory=lambda: array("q"))
     cached_input_tokens: array[int] = field(default_factory=lambda: array("q"))
+    cache_creation_tokens: array[int] = field(default_factory=lambda: array("q"))
+    cache_accounting: list[str] = field(default_factory=list)
     reasoning_tokens: array[int] = field(default_factory=lambda: array("q"))
     request_count: array[int] = field(default_factory=lambda: array("q"))
     status: list[str] = field(default_factory=list)
@@ -100,6 +102,8 @@ class TraceStore:
         self.input_tokens.append(call.input_tokens)
         self.output_tokens.append(call.output_tokens)
         self.cached_input_tokens.append(call.cached_input_tokens or 0)
+        self.cache_creation_tokens.append(call.cache_creation_tokens or 0)
+        self.cache_accounting.append(call.cache_accounting or "absent")
         self.reasoning_tokens.append(call.reasoning_tokens or 0)
         self.request_count.append(call.request_count)
         self.status.append(

@@ -95,6 +95,8 @@ def call_cost(
         input_tokens=int(store.input_tokens[index]),
         output_tokens=int(store.output_tokens[index]),
         cached_input_tokens=int(store.cached_input_tokens[index]),
+        cache_creation_tokens=int(store.cache_creation_tokens[index]),
+        cache_accounting=store.cache_accounting[index],
         is_batch=use_batch,
         tier=tier,
     )

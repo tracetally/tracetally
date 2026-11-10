@@ -59,7 +59,8 @@ class ModelPrice:
 
     def rates(self, input_tokens: int) -> tuple[Decimal, Decimal, Decimal]:
         """``(input, cached_input, output)`` per 1M tokens for the standard tier."""
-        return _quote(self.standard_rates, None, input_tokens)
+        incoming, cached, _creation, outgoing = _quote(self.standard_rates, None, input_tokens)
+        return incoming, cached, outgoing
 
     def list_cost(
         self,
@@ -67,6 +68,8 @@ class ModelPrice:
         input_tokens: int,
         output_tokens: int,
         cached_input_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+        cache_accounting: str = "included",
         is_batch: bool = False,
         tier: str | None = None,
     ) -> Decimal:
@@ -75,10 +78,12 @@ class ModelPrice:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_input_tokens=cached_input_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_accounting=cache_accounting,
             is_batch=is_batch,
             tier=tier,
         )
-        return amount
+        return amount if amount is not None else Decimal(0)
 
     def cost(
         self,
@@ -86,23 +91,37 @@ class ModelPrice:
         input_tokens: int,
         output_tokens: int,
         cached_input_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+        cache_accounting: str = "included",
         is_batch: bool = False,
         tier: str | None = None,
-    ) -> tuple[Decimal, bool]:
+    ) -> tuple[Decimal | None, bool]:
         """Return ``(cost, batch_rate_applied)``.
 
-        Cached tokens are a subset of ``input_tokens`` and are priced at the
-        cache rate. The over-200k rate applies only to this request. Batch,
+        ``cache_accounting`` says whether ``input_tokens`` already contains
+        cache reads. Subtraction happens only for ``included``, and only here.
+        Cache writes are priced at the published creation rate. A missing
+        creation rate does not become the input rate or zero: the cost is
+        unknown. The over-200k rate applies only to this request. Batch,
         priority, and flex rates apply only when that tier was requested.
         """
+        uncached, read, write, sized = _cache_buckets(
+            input_tokens,
+            cached_input_tokens,
+            cache_creation_tokens,
+            cache_accounting,
+        )
         selected, applied = _selected_tier(self, is_batch=is_batch, tier=tier)
         card = _tier_card(self, selected)
-        input_rate, cached_rate, output_rate = _quote(self.standard_rates, card, input_tokens)
-        cached = min(max(cached_input_tokens, 0), max(input_tokens, 0))
-        uncached = input_tokens - cached
+        input_rate, cached_rate, creation_rate, output_rate = _quote(
+            self.standard_rates, card, sized
+        )
+        if write and creation_rate is None:
+            return None, False
         amount = (
             token_cost(uncached, input_rate)
-            + token_cost(cached, cached_rate)
+            + token_cost(read, cached_rate)
+            + token_cost(write, creation_rate or Decimal(0))
             + token_cost(output_tokens, output_rate)
         )
         if self.discount:
@@ -401,9 +420,31 @@ def _tier_card(price: ModelPrice, name: str) -> TierRates | None:
     return None
 
 
+def _cache_buckets(
+    input_tokens: int,
+    cached_input_tokens: int,
+    cache_creation_tokens: int,
+    cache_accounting: str,
+) -> tuple[int, int, int, int]:
+    """Return ``(uncached_input, cache_read, cache_write, tier_size)``.
+
+    ``tier_size`` is the request size the over-200k tier looks at. ``included``
+    already counts cache reads inside ``input_tokens``. ``separate`` does not.
+    ``absent`` ignores cache counters.
+    """
+    read = max(cached_input_tokens, 0)
+    write = max(cache_creation_tokens, 0)
+    if cache_accounting == "absent":
+        return max(input_tokens, 0), 0, 0, max(input_tokens, 0)
+    if cache_accounting == "included":
+        read = min(read, max(input_tokens, 0))
+        return max(input_tokens, 0) - read, read, write, max(input_tokens, 0) + write
+    return max(input_tokens, 0), read, write, max(input_tokens, 0) + read + write
+
+
 def _quote(
     standard: TierRates, tier: TierRates | None, input_tokens: int
-) -> tuple[Decimal, Decimal, Decimal]:
+) -> tuple[Decimal, Decimal, Decimal | None, Decimal]:
     chosen = tier if tier is not None else standard
     use_long = (
         input_tokens > _LONG_CONTEXT_TOKENS
@@ -426,11 +467,17 @@ def _quote(
             cached = standard.long_cached
         if cached is None:
             cached = source.long_input
-        return source.long_input, cached, source.long_output
+        creation = source.long_creation
+        if creation is None:
+            creation = standard.long_creation
+        if creation is None:
+            creation = source.creation if source.creation is not None else standard.creation
+        return source.long_input, cached, creation, source.long_output
     incoming = chosen.input if chosen.input is not None else standard.input
     outgoing = chosen.output if chosen.output is not None else standard.output
     assert incoming is not None and outgoing is not None
     cached = chosen.cached if chosen.cached is not None else standard.cached
     if cached is None:
         cached = incoming
-    return incoming, cached, outgoing
+    creation = chosen.creation if chosen.creation is not None else standard.creation
+    return incoming, cached, creation, outgoing
