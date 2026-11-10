@@ -61,7 +61,8 @@ def test_report_writes_three_files_and_stays_offline(tmp_path: Path) -> None:
     assert CANARY not in markdown
     assert CANARY not in json.dumps(payload)
     assert payload["schema_version"] == 1
-    assert payload["synthetic"] is False
+    assert "synthetic" not in payload
+    assert "demo_seed" not in payload
     assert payload["include_content"] is False
     assert payload["content_excerpts"] == []
     assert payload["totals"]["est_monthly_savings_usd"]["mid"] == "0.02379"

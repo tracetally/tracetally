@@ -158,8 +158,6 @@ characters of prompt text per call and prints up to two 500-character excerpts
 on each finding. It is not a full prompt export. `--redact` wins: the text is
 not kept, and the command says so.
 
-`--synthetic` adds the SYNTHETIC DATA banner on `report`.
-
 Exit codes for `summary`, `analyze`, and `report`: `0` ok, `2` usage,
 `3` input or price-file error, `4` records were read but none could be priced.
 `report` still writes the files when the exit code is 4. `run` exits `0` when

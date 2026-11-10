@@ -322,10 +322,6 @@ def report_command(
         bool,
         typer.Option("--no-footer", help="Omit the one-line footer."),
     ] = False,
-    synthetic: Annotated[
-        bool,
-        typer.Option("--synthetic", help="Label the report as synthetic data."),
-    ] = False,
 ) -> None:
     """Write report.md, report.html, and findings.json. Prints the summary and findings."""
     if not files:
@@ -346,8 +342,6 @@ def report_command(
         redact=redact,
         include_content=include_content,
         footer=not no_footer,
-        synthetic=synthetic,
-        demo_seed=None,
     )
 
 
@@ -511,8 +505,6 @@ def _emit_report(
     redact: bool,
     include_content: bool,
     footer: bool,
-    synthetic: bool,
-    demo_seed: int | None,
 ) -> None:
     from tracetally.report.render import ReportOptions, write_report
 
@@ -545,8 +537,6 @@ def _emit_report(
                 include_content=include_content and not redact,
                 content_requested=include_content,
                 footer=footer,
-                synthetic=synthetic,
-                demo_seed=demo_seed,
                 generated_at=datetime.now(timezone.utc),
                 redact_salt=secrets.token_hex(16) if redact else None,
             ),
@@ -557,12 +547,6 @@ def _emit_report(
     except (ReaderError, PriceError) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=EXIT_INPUT) from exc
-    if synthetic:
-        typer.echo("SYNTHETIC DATA")
-        if demo_seed is not None:
-            typer.echo(
-                f"Acme Support Bot demo. Seed {demo_seed}. Planted rows, not a customer export."
-            )
     for path in (written.markdown, written.html, written.findings):
         typer.echo(f"wrote {path}")
     summary_text = written.analysis.summary.to_text()

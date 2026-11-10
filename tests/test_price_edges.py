@@ -468,8 +468,6 @@ def test_report_shows_billed_and_inferred_and_flags_a_large_gap(tmp_path: Path) 
             include_content=False,
             content_requested=False,
             footer=False,
-            synthetic=False,
-            demo_seed=None,
             generated_at=datetime(2026, 11, 10, tzinfo=timezone.utc),
         ),
     )
@@ -769,8 +767,6 @@ def test_currency_header_and_findings_record_fx(tmp_path: Path) -> None:
             include_content=False,
             content_requested=False,
             footer=False,
-            synthetic=False,
-            demo_seed=None,
             generated_at=datetime(2026, 11, 10, tzinfo=timezone.utc),
         ),
     )
@@ -968,8 +964,6 @@ def test_report_shows_price_source_and_date(tmp_path: Path) -> None:
             include_content=False,
             content_requested=False,
             footer=True,
-            synthetic=False,
-            demo_seed=None,
             generated_at=datetime(2026, 11, 10, tzinfo=timezone.utc),
         ),
     )

@@ -28,7 +28,6 @@ def test_report_markdown_keeps_blank_lines_after_block_tags(tmp_path: Path) -> N
             str(tmp_path / "tiers.example.yaml"),
             "--pricing-config",
             str(prices),
-            "--synthetic",
             "--out",
             str(out),
             "--offline",
@@ -36,6 +35,6 @@ def test_report_markdown_keeps_blank_lines_after_block_tags(tmp_path: Path) -> N
     )
     assert result.exit_code == 0, result.output
     markdown = (out / "report.md").read_text(encoding="utf-8")
-    assert "customer export.\n\n# LLM cost and reliability audit\n" in markdown
+    assert "SYNTHETIC DATA" not in markdown
     assert "was not fetched.\n\n## Executive summary\n" in markdown
     assert re.search(r"\(what-if\)\n\n`", markdown)

@@ -54,8 +54,6 @@ class ReportOptions:
     include_content: bool = False
     content_requested: bool = False
     footer: bool = True
-    synthetic: bool = False
-    demo_seed: int | None = None
     generated_at: datetime | None = None
     redact_salt: str | None = None
     dashboard: bool = False
@@ -115,8 +113,6 @@ def write_run(store: TraceStore, analysis: Analysis, options: ReportOptions) -> 
         include_content=options.include_content,
         content_requested=options.content_requested,
         footer=options.footer,
-        synthetic=options.synthetic,
-        demo_seed=options.demo_seed,
         generated_at=options.generated_at,
         redact_salt=options.redact_salt,
         dashboard=True,
@@ -238,8 +234,6 @@ def _context(
     return {
         "version": __version__,
         "generated_at": _generated_at(options),
-        "synthetic": options.synthetic,
-        "demo_seed": options.demo_seed,
         "redacted": options.redact,
         "include_content": content_in_report,
         "footer": options.footer,
@@ -322,8 +316,6 @@ def _document(
     result = RunResult(
         tracetally_version=__version__,
         generated_at=_generated_at(options),
-        synthetic=options.synthetic,
-        demo_seed=options.demo_seed,
         redacted=options.redact,
         include_content=content_in_report,
         show_footer=options.footer,
@@ -576,14 +568,6 @@ def _methodology(
         "and this run records which copy it used. "
         "tracetally is not a proxy, gateway, SDK, or server.",
     ]
-    if options.synthetic:
-        seed = "" if options.demo_seed is None else f" Seed {options.demo_seed}."
-        paragraphs.append(
-            "SYNTHETIC DATA. The Acme Support Bot rows are a fixed planted sample, "
-            "not a customer export."
-            + seed
-            + " The seed labels the run and does not redraw the rows."
-        )
     return paragraphs
 
 

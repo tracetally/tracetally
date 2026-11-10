@@ -367,7 +367,7 @@ def otel_document() -> dict[str, Any]:
                         _kv("service.name", "acme-support-bot"),
                     ]
                 },
-                "scopeSpans": [{"scope": {"name": "tracetally.synthetic"}, "spans": span_rows}],
+                "scopeSpans": [{"scope": {"name": "tracetally.test"}, "spans": span_rows}],
             }
         ]
     }
@@ -375,17 +375,6 @@ def otel_document() -> dict[str, Any]:
 
 def tier_map_text() -> str:
     return "endpoints:\n  support.swap:\n    provider: openai\n    model: gpt-4o-mini\n"
-
-
-def ground_truth_document() -> dict[str, Any]:
-    return {
-        "control_endpoint": CONTROL_ENDPOINT,
-        "planted": PLANTED,
-        "notes": (
-            "Dollars assume a 30-day window (monthly factor 1) and the bundled "
-            "2026-10 price table. model_swap is a what-if."
-        ),
-    }
 
 
 def write_examples(root: Path) -> None:
@@ -398,10 +387,6 @@ def write_examples(root: Path) -> None:
         encoding="utf-8",
     )
     (target / "tiers.example.yaml").write_text(tier_map_text(), encoding="utf-8")
-    (target / "ground_truth.json").write_text(
-        json.dumps(ground_truth_document(), indent=2) + "\n",
-        encoding="utf-8",
-    )
 
 
 def _llm_span(row: dict[str, Any]) -> dict[str, Any]:
