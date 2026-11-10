@@ -157,6 +157,17 @@ def _annotate_run_document(document: dict[str, Any], findings: list[Any]) -> Non
         raw["cost_label"] = cost_label(item, str(document.get("currency") or "USD"))
 
 
+def _normal_dir_mode() -> int:
+    """Directory mode ``0o755`` with the process umask applied.
+
+    ``mkdtemp`` creates ``0o700``. A report folder should follow the umask the
+    way ``mkdir`` does.
+    """
+    current = os.umask(0)
+    os.umask(current)
+    return 0o755 & ~current & 0o777
+
+
 def _write_atomic_dir(out: Path, files: dict[str, str]) -> dict[str, Path]:
     """Publish ``files`` into ``out``. A new directory appears in one rename."""
     if out.exists() and not out.is_dir():
@@ -164,6 +175,7 @@ def _write_atomic_dir(out: Path, files: dict[str, str]) -> dict[str, Path]:
     parent = out.parent
     parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".tracetally-", dir=parent))
+    os.chmod(staging, _normal_dir_mode())
     try:
         for name, text in files.items():
             payload = text if text.endswith("\n") else text + "\n"
@@ -202,13 +214,38 @@ def _environment(*, autoescape: bool) -> Environment:
         undefined=StrictUndefined,
         trim_blocks=True,
         lstrip_blocks=True,
+        finalize=None if autoescape else markdown_text,
     )
-    env.filters["md_cell"] = _md_cell
     return env
 
 
-def _md_cell(value: object) -> str:
-    return str(value).replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+def markdown_text(value: object) -> str:
+    """One Markdown-safe rendering of a value interpolated into ``report.md``.
+
+    ``<``, ``>``, and ``&`` become HTML entities. Backticks, brackets, and
+    pipes cannot open a code span, a link, or a table cell. CR, LF, and other
+    C0/C1 controls become spaces, so a newline cannot start a heading.
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    flattened: list[str] = []
+    for char in text:
+        code = ord(char)
+        if code < 32 or code == 127 or 0x80 <= code <= 0x9F or char in {"\u2028", "\u2029"}:
+            flattened.append(" ")
+        else:
+            flattened.append(char)
+    safe = "".join(flattened)
+    return (
+        safe.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("`", "&#96;")
+        .replace("[", "&#91;")
+        .replace("]", "&#93;")
+        .replace("|", "&#124;")
+    )
 
 
 def _context(

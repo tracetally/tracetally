@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from decimal import Decimal
 from pathlib import Path
 
@@ -131,6 +132,55 @@ def test_run_warns_on_a_bad_file_and_continues(tmp_path: Path) -> None:
     assert payload["totals"]["calls"] == 1
     assert any("file skipped" in warning for warning in payload["warnings"])
     assert not list(out.glob(".tracetally-*"))
+
+
+def test_run_directory_follows_umask_and_prints_price_warnings(tmp_path: Path) -> None:
+    source = tmp_path / "calls.jsonl"
+    source.write_text(
+        '{"model":"gpt-4o-mini","provider":"openai","start_time":"2026-10-01T00:00:00Z",'
+        '"input_tokens":10,"output_tokens":1}\n',
+        encoding="utf-8",
+    )
+    config = tmp_path / "prices.toml"
+    config.write_text('surprise = "1"\ncurrency = "USD"\n', encoding="utf-8")
+    out = tmp_path / "report"
+    result = runner.invoke(
+        app,
+        ["run", str(source), "--offline", "--pricing-config", str(config), "--out", str(out)],
+    )
+    assert result.exit_code == EXIT_OK, result.output
+    warnings = result.stderr or result.output
+    assert "unknown key" in warnings
+    assert "surprise" in warnings
+    current = os.umask(0)
+    os.umask(current)
+    assert (out.stat().st_mode & 0o777) == (0o755 & ~current & 0o777)
+
+
+def test_run_strips_terminal_controls_from_names(tmp_path: Path) -> None:
+    model = "gpt-4o-mini\x1b[31mRED"
+    source = tmp_path / "calls.jsonl"
+    source.write_text(
+        json.dumps(
+            {
+                "model": model,
+                "provider": "openai",
+                "endpoint": "edge\x1b[2J",
+                "start_time": "2026-10-01T00:00:00Z",
+                "input_tokens": 10,
+                "output_tokens": 1,
+                "http_status": 500,
+                "duration_ms": 20,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    result = runner.invoke(app, ["run", str(source), "--offline", "--out", str(out)])
+    assert result.exit_code == EXIT_OK, result.output
+    assert "\x1b" not in result.output
+    assert "\x1b" not in (result.stderr or "")
 
 
 def _prices(directory: Path) -> Path:

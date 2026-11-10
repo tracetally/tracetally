@@ -59,8 +59,36 @@ _SCRIPT = """\
   add(app, "h1", "tracetally");
   var summary = data.summary || {};
   var totals = data.totals || {};
-  var calls = totals.calls == null ? "" : totals.calls;
-  add(app, "p", "Calls " + calls);
+  var summaryTotals = summary.totals || {};
+  var calls = totals.calls;
+  if (calls == null) {
+    calls = summaryTotals.calls;
+  }
+  var pricedCalls = totals.priced_calls;
+  if (pricedCalls == null) {
+    pricedCalls = summaryTotals.priced_calls;
+  }
+  var unpricedCalls = totals.unpriced_calls;
+  if (unpricedCalls == null) {
+    unpricedCalls = summaryTotals.unpriced_calls;
+  }
+  var pricedShare = totals.priced_share || summaryTotals.priced_share || "";
+  var cost = totals.observed_cost_usd;
+  if (cost == null) {
+    cost = summaryTotals.cost_usd;
+  }
+  var currency = data.currency || summary.currency || "";
+  var costText = cost == null || cost === "" ? "cost unknown" : cost + " " + currency;
+  add(app, "p", "Total cost " + costText);
+  add(app, "p", "Priced share " + pricedCalls + "/" + calls + " (" + pricedShare + ")");
+  var spendPriced = "0.00%";
+  if (Number(calls || 0) > 0 && Number(unpricedCalls || 0) === 0 && cost != null && cost !== "") {
+    spendPriced = "100.00%";
+  } else if (Number(pricedCalls || 0) > 0 && Number(unpricedCalls || 0) > 0) {
+    spendPriced = "cost unknown";
+  }
+  add(app, "p", "Spend priced " + spendPriced);
+  add(app, "p", "Unpriced calls " + unpricedCalls + " (cost unknown)");
   var meta = document.createElement("p");
   meta.className = "muted";
   meta.textContent = [

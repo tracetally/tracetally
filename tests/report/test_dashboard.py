@@ -76,3 +76,50 @@ def test_dashboard_escapes_hostile_names_and_hashes_the_script(tmp_path: Path) -
     models = " ".join(row["model"] for row in payload["summary"]["by_model"])
     assert hostile in titles
     assert hostile in models
+
+
+def test_dashboard_shows_cost_priced_share_and_unpriced(tmp_path: Path) -> None:
+    path = tmp_path / "mixed.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "model": "gpt-4o-mini",
+                        "provider": "openai",
+                        "start_time": "2026-10-01T00:00:00Z",
+                        "input_tokens": 1_000_000,
+                        "output_tokens": 0,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "model": "no-such-model",
+                        "provider": "openai",
+                        "start_time": "2026-10-01T00:00:01Z",
+                        "input_tokens": 10,
+                        "output_tokens": 1,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    result = runner.invoke(app, ["run", str(path), "--offline", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    payload = json.loads((out / "findings.json").read_text(encoding="utf-8"))
+    assert payload["totals"]["priced_calls"] == 1
+    assert payload["totals"]["calls"] == 2
+    assert payload["totals"]["unpriced_calls"] == 1
+    assert payload["totals"]["priced_share"] == "50.00%"
+    assert payload["totals"]["observed_cost_usd"] == "0.15"
+    html = (out / "dashboard.html").read_text(encoding="utf-8")
+    assert "Total cost " in html
+    assert "Priced share " in html
+    assert "Spend priced " in html
+    assert "Unpriced calls " in html
+    assert "cost unknown" in html
+    assert "0.15" in html
+    assert "50.00%" in html

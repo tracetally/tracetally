@@ -86,8 +86,10 @@ def run_command(
         store = load_paths(list(files), ReaderConfig(), lenient=True)
         for warning in store.warnings:
             if warning.startswith("file skipped:"):
-                typer.echo(f"warning: {warning}", err=True)
+                typer.echo(f"warning: {_terminal_safe(warning)}", err=True)
         table = load_prices(offline=offline, pricing_config=pricing_config)
+        for warning in table.warnings:
+            typer.echo(f"warning: {_terminal_safe(warning)}", err=True)
         result = analyze(store, table)
         written = write_run(
             store,
@@ -556,20 +558,35 @@ def _emit_report(
     _exit_if_empty(written.analysis)
 
 
+def _terminal_safe(value: object) -> str:
+    """Fold ESC, C0, and C1 controls so a name cannot rewrite the terminal."""
+    text = "" if value is None else str(value)
+    safe: list[str] = []
+    for char in text:
+        code = ord(char)
+        if code < 32 or code == 127 or 0x80 <= code <= 0x9F or char in {"\u2028", "\u2029"}:
+            safe.append(" ")
+        else:
+            safe.append(char)
+    return "".join(safe)
+
+
 def _print_run_summary(result: Analysis, out: Path) -> None:
     summary = result.summary
     typer.echo(
         f"tracetally {__version__}  calls {summary.calls}  "
         f"priced {summary.priced_calls}/{summary.calls}  "
-        f"{format_usd(summary.cost_usd)} {summary.currency}"
+        f"{format_usd(summary.cost_usd)} {_terminal_safe(summary.currency)}"
     )
     ranked = rank_findings(list(result.findings))
     if not ranked:
         typer.echo("No findings.")
     for index, item in enumerate(ranked, start=1):
         what_if = " (what-if)" if item.what_if else ""
-        typer.echo(f"{index}. {item.title}{what_if}  {cost_label(item, summary.currency)}")
-    typer.echo(f"report: {out}")
+        title = _terminal_safe(item.title)
+        label = _terminal_safe(cost_label(item, summary.currency))
+        typer.echo(f"{index}. {title}{what_if}  {label}")
+    typer.echo(f"report: {_terminal_safe(out)}")
     typer.echo(f"{AUDIT_CTA_TEXT}: {AUDIT_CTA_URL}")
 
 
