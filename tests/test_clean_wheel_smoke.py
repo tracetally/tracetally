@@ -39,9 +39,12 @@ def test_smoke_analyzes_offline_and_leaves_run_disabled(capsys) -> None:
         assert '"model"' in text
         return _ok(list(argv))
 
-    module.run_smoke(Path("/tmp/tt/bin/tracetally"), runner=runner)
+    binary = Path("/tmp/tt/bin/tracetally")
+    module.run_smoke(binary, runner=runner)
     assert len(calls) == 1
-    assert calls[0][:3] == ["/tmp/tt/bin/tracetally", "analyze", "--offline"]
+    # Windows stringifies Path with backslashes. Compare the path, not the text.
+    assert Path(calls[0][0]) == binary
+    assert calls[0][1:3] == ["analyze", "--offline"]
     assert Path(calls[0][-1]).name == "calls.jsonl"
     assert module.RUN_OFFLINE_ENABLED is False
     assert module.EMPTY_FOLDER_ENABLED is False
