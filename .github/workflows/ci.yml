@@ -1,6 +1,8 @@
-# Trimmed while this repo is private. Run the full matrix once via
-# workflow_dispatch (full_matrix) on the release-candidate head before
-# tagging. Revert this trim once the repo is public.
+# Trimmed while this repo is private. When repository.private is false,
+# every trigger uses the full matrix, including pull requests. If that
+# flag cannot be read, the trimmed matrix stays. Run the full matrix once
+# via workflow_dispatch (full_matrix) on the release-candidate head before
+# tagging. A push to main does not cancel that dispatch.
 name: CI
 
 on:
@@ -18,9 +20,11 @@ on:
 permissions:
   contents: read
 
+# event_name keeps a push to main from cancelling a workflow_dispatch
+# full-matrix run on the same ref. Only a newer pull_request cancels.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PYTHONUTF8: "1"
@@ -47,7 +51,7 @@ jobs:
         run: python scripts/check_no_http_clients.py
 
   # Matrix from the event. Default is ubuntu 3.10 and 3.13. Full is
-  # workflow_dispatch with full_matrix, or a push to main once the repo is public.
+  # full_matrix, or any trigger once repository.private is false.
   test-matrix:
     runs-on: ubuntu-latest
     outputs:
@@ -58,15 +62,16 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           FULL_MATRIX: ${{ inputs.full_matrix }}
-          REF: ${{ github.ref }}
-          VISIBILITY: ${{ github.event.repository.visibility }}
+          PRIVATE: ${{ github.event.repository.private }}
         run: |
           set -euo pipefail
+          # PRIVATE is "false" only when the payload says the repo is public.
+          # An empty value means visibility could not be read: stay trimmed.
           full=false
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$FULL_MATRIX" = "true" ]; then
             full=true
           fi
-          if [ "$REF" = "refs/heads/main" ] && [ "$VISIBILITY" = "public" ]; then
+          if [ "$PRIVATE" = "false" ]; then
             full=true
           fi
           if [ "$full" = "true" ]; then
