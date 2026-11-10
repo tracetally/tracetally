@@ -29,10 +29,10 @@ file, the bundled LiteLLM snapshot. A weekly workflow refreshes that snapshot
 and opens a pull request. It does not push to `main`.
 
 CI installs that wheel in a fresh venv and runs `scripts/clean_wheel_smoke.py`.
-The live command is `tracetally analyze --offline` on JSONL generated at
-runtime by `tests.support.synthetic`. `tracetally run --offline`, the empty
-directory check (`No LLM usage file found`, exit 0), and auto-detect stay
-disabled until those commands exist.
+That runs `tracetally run --offline` on JSONL generated at runtime by
+`tests.support.synthetic`, then on an empty directory. The empty directory
+must print `No LLM usage file found` and exit 0. Until B1 adds `run`, that
+step fails. Auto-detect waits for B2.
 
 ## Prices
 

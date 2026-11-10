@@ -18,48 +18,8 @@ def _smoke():
     return module
 
 
-def _ok(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    path = Path(argv[-1])
-    if path.is_dir():
-        return subprocess.CompletedProcess(argv, 0, stdout="No LLM usage file found\n", stderr="")
-    return subprocess.CompletedProcess(argv, 0, stdout="ok\n", stderr="")
-
-
-def test_smoke_analyzes_offline_and_leaves_run_disabled(capsys) -> None:
+def test_smoke_runs_offline_on_factory_output_and_an_empty_folder() -> None:
     module = _smoke()
-    calls: list[list[str]] = []
-
-    def runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
-        calls.append(list(argv))
-        path = Path(argv[-1])
-        assert path.is_file()
-        assert path.suffix == ".jsonl"
-        text = path.read_text(encoding="utf-8")
-        assert text.strip()
-        assert '"model"' in text
-        return _ok(list(argv))
-
-    binary = Path("/tmp/tt/bin/tracetally")
-    module.run_smoke(binary, runner=runner)
-    assert len(calls) == 1
-    # Windows stringifies Path with backslashes. Compare the path, not the text.
-    assert Path(calls[0][0]) == binary
-    assert calls[0][1:3] == ["analyze", "--offline"]
-    assert Path(calls[0][-1]).name == "calls.jsonl"
-    assert module.RUN_OFFLINE_ENABLED is False
-    assert module.EMPTY_FOLDER_ENABLED is False
-    assert module.AUTO_DETECT_ENABLED is False
-    notes = capsys.readouterr().out
-    assert "TODO(B1): tracetally run --offline on the runtime-generated JSONL" in notes
-    assert "No LLM usage file found" in notes
-    assert "TODO(B2): auto-detect a directory of mixed usage files" in notes
-    assert "do not pass a format flag" in notes
-
-
-def test_enabling_b1_runs_offline_and_requires_the_empty_folder_message(monkeypatch) -> None:
-    module = _smoke()
-    monkeypatch.setattr(module, "RUN_OFFLINE_ENABLED", True)
-    monkeypatch.setattr(module, "EMPTY_FOLDER_ENABLED", True)
     calls: list[list[str]] = []
 
     def runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -67,20 +27,33 @@ def test_enabling_b1_runs_offline_and_requires_the_empty_folder_message(monkeypa
         path = Path(argv[-1])
         if path.is_dir():
             assert list(path.iterdir()) == []
-        return _ok(list(argv))
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=f"{module.EMPTY_FOLDER_MESSAGE}\n", stderr=""
+            )
+        assert path.is_file()
+        assert path.suffix == ".jsonl"
+        assert path.read_text(encoding="utf-8").strip()
+        return subprocess.CompletedProcess(argv, 0, stdout="ok\n", stderr="")
 
-    module.run_smoke(Path("tracetally"), runner=runner)
-    assert [call[1:3] for call in calls] == [
-        ["analyze", "--offline"],
-        ["run", "--offline"],
-        ["run", "--offline"],
-    ]
+    binary = Path("/tmp/tt/bin/tracetally")
+    module.run_smoke(binary, runner=runner)
+    assert [call[1:3] for call in calls] == [["run", "--offline"], ["run", "--offline"]]
+    # Windows stringifies Path with backslashes. Compare the path, not the text.
+    assert Path(calls[0][0]) == binary
+    assert Path(calls[1][0]) == binary
     assert Path(calls[0][-1]).name == "calls.jsonl"
-    assert Path(calls[1][-1]).name == "calls.jsonl"
-    assert Path(calls[2][-1]).name == "empty"
+    assert Path(calls[1][-1]).name == "empty"
+    assert calls[0][-1] != calls[1][-1]
+
+
+def test_empty_folder_must_print_the_message_and_exit_0() -> None:
+    module = _smoke()
 
     def quiet(argv: list[str]) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(argv, 0, stdout="nothing to see\n", stderr="")
+        path = Path(argv[-1])
+        if path.is_dir():
+            return subprocess.CompletedProcess(argv, 0, stdout="nothing to see\n", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
     try:
         module.run_smoke(Path("tracetally"), runner=quiet)
@@ -97,44 +70,21 @@ def test_enabling_b1_runs_offline_and_requires_the_empty_folder_message(monkeypa
     except SystemExit as exc:
         assert "exited 2" in str(exc)
     else:
-        raise AssertionError("non-zero command was accepted")
+        raise AssertionError("non-zero run was accepted")
 
 
-def test_auto_detect_stays_disabled_and_fails_closed_when_forced(monkeypatch) -> None:
-    module = _smoke()
-    monkeypatch.setattr(module, "AUTO_DETECT_ENABLED", True)
-
-    def runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
-        assert argv[1] == "analyze"
-        return _ok(list(argv))
-
-    try:
-        module.run_smoke(Path("tracetally"), runner=runner)
-    except SystemExit as exc:
-        assert "TODO(B2)" in str(exc)
-        assert "format flag" in str(exc)
-    else:
-        raise AssertionError("auto-detect was treated as done")
-
-
-def test_ci_smokes_analyze_and_disables_run_until_later_prs() -> None:
+def test_ci_smokes_run_and_not_the_demo_examples() -> None:
     text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    script = (ROOT / "scripts" / "clean_wheel_smoke.py").read_text(encoding="utf-8")
     assert "scripts/clean_wheel_smoke.py" in text
     assert "scripts/check_package_contents.py" in text
     assert "scripts/check_no_http_clients.py" in text
-    assert "analyze --offline" in text
-    assert text.count("if: ${{ false }}") == 3
-    assert "TODO(B1): tracetally run --offline on the runtime-generated JSONL" in text
-    assert "TODO(B1): empty folder prints No LLM usage file found and exits 0" in text
-    assert "TODO(B2): auto-detect a directory of mixed usage files, no format flag" in text
-    assert "this step fails" not in text
     assert "tracetally summary" not in text
     assert "tracetally demo" not in text
+    assert "analyze --offline" not in text
+    assert "if: ${{ false }}" not in text
     assert "examples/synthetic" not in text
-    assert "RUN_OFFLINE_ENABLED = False" in script
-    assert "EMPTY_FOLDER_ENABLED = False" in script
-    assert "AUTO_DETECT_ENABLED = False" in script
+    assert "auto-detect" in text
+    assert "B1" in text
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     assert "scripts/clean_wheel_smoke.py" in release
     assert "examples/synthetic" not in release
@@ -157,5 +107,3 @@ def test_ci_matrix_is_trimmed_while_the_repo_is_private() -> None:
     assert "visibility" in text
     assert "refs/heads/main" in text
     assert "Revert this trim once the repo is public" in text
-    assert "analyze --offline" in text
-    assert text.count("if: ${{ false }}") == 3

@@ -125,37 +125,15 @@ jobs:
           python -m build
       - name: Package contains only the LiteLLM snapshot as data
         run: python scripts/check_package_contents.py dist/*
-      # One offline smoke of the built wheel. PR A's package smoke and this
-      # clean-wheel smoke both install that wheel and stay offline, so they
-      # are one step: a fresh venv, then `tracetally analyze --offline` on
-      # JSONL generated at runtime by tests.support.synthetic. Do not call
-      # summary or demo, and do not read a committed file under examples/.
-      - name: Install the wheel in a fresh venv and analyze --offline
+      - name: Install the wheel in a fresh venv
         run: |
           python -m venv /tmp/tt
           /tmp/tt/bin/pip install dist/*.whl
           /tmp/tt/bin/python scripts/check_no_http_clients.py
-          /tmp/tt/bin/python scripts/clean_wheel_smoke.py /tmp/tt/bin/tracetally
-      # TODO(B1): `tracetally run` is not on this branch. Enable this step
-      # together with RUN_OFFLINE_ENABLED in scripts/clean_wheel_smoke.py.
-      # Command: tracetally run --offline <runtime-generated.jsonl>
-      - name: "TODO(B1): tracetally run --offline on the runtime-generated JSONL"
-        if: ${{ false }}
-        run: |
-          echo "TODO(B1): tracetally run --offline on the runtime-generated JSONL"
-          exit 1
-      # TODO(B1): enable with EMPTY_FOLDER_ENABLED. The empty directory must
-      # print "No LLM usage file found" and exit 0.
-      # Command: tracetally run --offline <empty-directory>
-      - name: "TODO(B1): empty folder prints No LLM usage file found and exits 0"
-        if: ${{ false }}
-        run: |
-          echo "TODO(B1): empty folder must print 'No LLM usage file found' and exit 0"
-          exit 1
-      # TODO(B2): auto-detect. A directory of mixed usage files, no format flag.
-      # Enable with AUTO_DETECT_ENABLED in scripts/clean_wheel_smoke.py.
-      - name: "TODO(B2): auto-detect a directory of mixed usage files, no format flag"
-        if: ${{ false }}
-        run: |
-          echo "TODO(B2): auto-detect a directory of mixed usage files; do not pass a format flag"
-          exit 1
+      # Clean wheel, not an editable install. `tracetally run` arrives in B1,
+      # which merges after this CI change. Until that command exists this step
+      # fails. Do not substitute analyze, summary, demo, or committed examples.
+      # B2 auto-detect is intentionally absent. Add that case in
+      # scripts/clean_wheel_smoke.py when B2 lands.
+      - name: Clean-wheel smoke
+        run: /tmp/tt/bin/python scripts/clean_wheel_smoke.py /tmp/tt/bin/tracetally
