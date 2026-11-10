@@ -209,7 +209,7 @@ def test_capability_skips_use_the_langfuse_and_openai_csv_readers() -> None:
     )
     assert {item.check for item in example_lang.skipped} == {"model_swap"}
 
-    cli = runner.invoke(app, ["analyze", str(usage), "--json"])
+    cli = runner.invoke(app, ["analyze", str(usage), "--json", "--offline"])
     assert cli.exit_code == 0, cli.output
     payload = json.loads(cli.stdout or cli.output)
     skipped = {item["check"]: item["reason"] for item in payload["skipped_checks"]}
@@ -346,7 +346,7 @@ def test_analyze_command_json_skips_and_exit_codes(tmp_path: Path) -> None:
     write_examples(tmp_path)
     jsonl = tmp_path / "synthetic.jsonl"
     tiers = tmp_path / "tiers.example.yaml"
-    text = runner.invoke(app, ["analyze", str(jsonl), "--tier-map", str(tiers)])
+    text = runner.invoke(app, ["analyze", str(jsonl), "--tier-map", str(tiers), "--offline"])
     assert text.exit_code == 0, text.output
     assert "what-if" in text.output
     assert _WHAT_IF in text.output
@@ -354,7 +354,17 @@ def test_analyze_command_json_skips_and_exit_codes(tmp_path: Path) -> None:
     assert "support.control" not in text.output
 
     machine = runner.invoke(
-        app, ["analyze", str(jsonl), "--tier-map", str(tiers), "--json", "--skip", "token_bloat"]
+        app,
+        [
+            "analyze",
+            str(jsonl),
+            "--tier-map",
+            str(tiers),
+            "--json",
+            "--skip",
+            "token_bloat",
+            "--offline",
+        ],
     )
     assert machine.exit_code == 0, machine.output
     payload = json.loads(machine.stdout or machine.output)
@@ -365,7 +375,7 @@ def test_analyze_command_json_skips_and_exit_codes(tmp_path: Path) -> None:
         for item in payload["skipped_checks"]
     )
 
-    unknown = runner.invoke(app, ["analyze", str(jsonl), "--only", "nope"])
+    unknown = runner.invoke(app, ["analyze", str(jsonl), "--only", "nope", "--offline"])
     assert unknown.exit_code == EXIT_USAGE
     assert "unknown check" in (unknown.stderr or unknown.output)
 
@@ -374,7 +384,7 @@ def test_analyze_command_json_skips_and_exit_codes(tmp_path: Path) -> None:
         '{"kind":"tool","name":"search","span_id":"s","start_time":"2026-10-01T00:00:00Z"}\n',
         encoding="utf-8",
     )
-    empty = runner.invoke(app, ["analyze", str(spans_only), "--format", "jsonl"])
+    empty = runner.invoke(app, ["analyze", str(spans_only), "--format", "jsonl", "--offline"])
     assert empty.exit_code == EXIT_INPUT
 
     unpriced = tmp_path / "private.jsonl"
@@ -383,7 +393,7 @@ def test_analyze_command_json_skips_and_exit_codes(tmp_path: Path) -> None:
         '"input_tokens":1,"output_tokens":1}\n',
         encoding="utf-8",
     )
-    bare = runner.invoke(app, ["analyze", str(unpriced), "--json"])
+    bare = runner.invoke(app, ["analyze", str(unpriced), "--json", "--offline"])
     assert bare.exit_code == EXIT_UNPRICED
 
     help_text = runner.invoke(app, ["analyze", "--help"])

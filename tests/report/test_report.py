@@ -41,6 +41,7 @@ def test_report_writes_three_files_and_stays_offline(tmp_path: Path) -> None:
             str(tmp_path / "tiers.example.yaml"),
             "--out",
             str(out),
+            "--offline",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -83,7 +84,14 @@ def test_no_footer_drops_the_project_link(tmp_path: Path) -> None:
     out = tmp_path / "out"
     result = runner.invoke(
         app,
-        ["report", str(tmp_path / "synthetic.jsonl"), "--out", str(out), "--no-footer"],
+        [
+            "report",
+            str(tmp_path / "synthetic.jsonl"),
+            "--out",
+            str(out),
+            "--no-footer",
+            "--offline",
+        ],
     )
     assert result.exit_code == 0, result.output
     html = (out / "report.html").read_text(encoding="utf-8")
@@ -105,7 +113,16 @@ def test_include_content_keeps_the_canary_and_redact_removes_it(tmp_path: Path) 
     redacted = tmp_path / "redacted"
     included = runner.invoke(
         app,
-        ["report", str(source), "--tier-map", str(tiers), "--out", str(shown), "--include-content"],
+        [
+            "report",
+            str(source),
+            "--tier-map",
+            str(tiers),
+            "--out",
+            str(shown),
+            "--include-content",
+            "--offline",
+        ],
     )
     assert included.exit_code == 0, included.output
     html = (shown / "report.html").read_text(encoding="utf-8")
@@ -115,7 +132,7 @@ def test_include_content_keeps_the_canary_and_redact_removes_it(tmp_path: Path) 
     assert_no_external_loads(html)
     assert "&lt;" not in CANARY
 
-    plain = runner.invoke(app, ["report", str(source), "--out", str(hidden)])
+    plain = runner.invoke(app, ["report", str(source), "--out", str(hidden), "--offline"])
     assert plain.exit_code == 0, plain.output
     assert CANARY not in (hidden / "report.html").read_text(encoding="utf-8")
 
@@ -128,6 +145,7 @@ def test_include_content_keeps_the_canary_and_redact_removes_it(tmp_path: Path) 
             str(redacted),
             "--include-content",
             "--redact",
+            "--offline",
         ],
     )
     assert both.exit_code == 0, both.output
@@ -168,7 +186,7 @@ def test_hostile_markup_is_text(tmp_path: Path) -> None:
     out = tmp_path / "out"
     result = runner.invoke(
         app,
-        ["report", str(path), "--out", str(out), "--include-content"],
+        ["report", str(path), "--out", str(out), "--include-content", "--offline"],
     )
     assert result.exit_code == 0, result.output
     html = (out / "report.html").read_text(encoding="utf-8")
@@ -182,7 +200,7 @@ def test_hostile_markup_is_text(tmp_path: Path) -> None:
 def test_cost_only_csv_skips_trace_checks(tmp_path: Path) -> None:
     csv_path = Path(__file__).resolve().parents[1] / "fixtures" / "openai" / "usage.csv"
     out = tmp_path / "out"
-    result = runner.invoke(app, ["report", str(csv_path), "--out", str(out)])
+    result = runner.invoke(app, ["report", str(csv_path), "--out", str(out), "--offline"])
     assert result.exit_code == 0, result.output
     html = (out / "report.html").read_text(encoding="utf-8")
     payload = json.loads((out / "findings.json").read_text(encoding="utf-8"))
@@ -196,7 +214,9 @@ def test_cost_only_csv_skips_trace_checks(tmp_path: Path) -> None:
 
 
 def test_demo_labels_synthetic_data_and_exercises_checks(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["demo", "--out", str(tmp_path / "demo"), "--seed", "7"])
+    result = runner.invoke(
+        app, ["demo", "--out", str(tmp_path / "demo"), "--seed", "7", "--offline"]
+    )
     assert result.exit_code == 0, result.output
     assert (
         result.output.startswith("SYNTHETIC DATA")
@@ -248,13 +268,15 @@ def test_report_exit_codes(tmp_path: Path) -> None:
         '"input_tokens":1,"output_tokens":1}\n',
         encoding="utf-8",
     )
-    unpriced = runner.invoke(app, ["report", str(unknown), "--out", str(tmp_path / "b")])
+    unpriced = runner.invoke(
+        app, ["report", str(unknown), "--out", str(tmp_path / "b"), "--offline"]
+    )
     assert unpriced.exit_code == EXIT_UNPRICED
     assert (tmp_path / "b" / "findings.json").is_file()
 
     blocked = tmp_path / "not-a-dir"
     blocked.write_text("x", encoding="utf-8")
-    bad_out = runner.invoke(app, ["report", str(unknown), "--out", str(blocked)])
+    bad_out = runner.invoke(app, ["report", str(unknown), "--out", str(blocked), "--offline"])
     assert bad_out.exit_code == EXIT_USAGE
 
 

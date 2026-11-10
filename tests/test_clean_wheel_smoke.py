@@ -135,3 +135,9 @@ def test_ci_smokes_analyze_and_disables_run_until_later_prs() -> None:
     assert "RUN_OFFLINE_ENABLED = False" in script
     assert "EMPTY_FOLDER_ENABLED = False" in script
     assert "AUTO_DETECT_ENABLED = False" in script
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert "scripts/clean_wheel_smoke.py" in release
+    assert "examples/synthetic" not in release
+    assert "tracetally summary" not in release
+    assert "environment:" in release
+    assert "id-token: write" in release
