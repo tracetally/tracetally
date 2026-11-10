@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM cost audits — tracetally</title>
+  <meta name="description" content="LLM cost and reliability audits from the author of tracetally. Work starts from exports you share. No production access is required.">
+  <style>
+    :root {
+      --ink: #1c1915;
+      --muted: #5c564c;
+      --line: #d9d2c5;
+      --paper: #f4f0e8;
+      --card: #fffdf8;
+      --accent: #8c3a2f;
+      --accent-d: #6f2d24;
+      --focus: #1c1915;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, "Times New Roman", serif;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .sans,
+    nav,
+    .kicker,
+    .btn,
+    label,
+    input,
+    select,
+    textarea,
+    button,
+    .meta,
+    .price-inr,
+    .fine,
+    .nav-brand span,
+    footer,
+    .skip,
+    .code {
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    a { color: var(--accent); }
+    a:hover { color: var(--accent-d); }
+
+    a:focus-visible,
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .skip {
+      position: absolute;
+      left: 1rem;
+      top: -3.5rem;
+      z-index: 20;
+      padding: 0.5rem 0.8rem;
+      background: var(--ink);
+      color: var(--card);
+      text-decoration: none;
+    }
+    .skip:focus { top: 0.6rem; }
+
+    .wrap {
+      width: min(1080px, calc(100% - 2.5rem));
+      margin: 0 auto;
+    }
+
+    /* Header */
+    header.site {
+      border-bottom: 1px solid var(--line);
+      background: rgba(244, 240, 232, 0.92);
+    }
+    .site-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      min-height: 4rem;
+      flex-wrap: wrap;
+      padding: 0.6rem 0;
+    }
+    .nav-brand {
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 1.15rem;
+      font-weight: 600;
+    }
+    .nav-brand span {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    nav ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 1.15rem;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      align-items: center;
+    }
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.92rem;
+      font-weight: 500;
+    }
+    nav a:hover { color: var(--ink); }
+    nav a.btn { color: var(--card); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      padding: 0.7rem 1.15rem;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      text-decoration: none;
+      border: 1px solid transparent;
+      cursor: pointer;
+      line-height: 1.2;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fffdf8;
+      border-color: var(--accent);
+    }
+    .btn-primary:hover {
+      background: var(--accent-d);
+      color: #fffdf8;
+      border-color: var(--accent-d);
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--ink);
+      border-color: var(--line);
+    }
+    .btn-ghost:hover {
+      border-color: var(--ink);
+      color: var(--ink);
+    }
+
+    /* Hero */
+    .hero {
+      padding: 4.25rem 0 3.5rem;
+    }
+    .kicker {
+      margin: 0 0 0.7rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4.4vw, 3.15rem);
+      font-weight: 600;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+    }
+    .tagline {
+      margin: 1.15rem 0 0;
+      font-size: clamp(1.2rem, 2.2vw, 1.5rem);
+      line-height: 1.35;
+      max-width: 36rem;
+    }
+    .lead {
+      margin: 1.1rem 0 0;
+      font-size: 1.08rem;
+      color: var(--ink);
+      max-width: 40rem;
+    }
+    .lead.muted, p.muted, .muted { color: var(--muted); }
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.7rem;
+      margin-top: 1.75rem;
+    }
+    .hero-note {
+      margin: 1.25rem 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .code {
+      display: inline-block;
+      padding: 0.12rem 0.4rem;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      font-size: 0.88em;
+    }
+
+    section {
+      padding: 3.25rem 0;
+    }
+    section.alt {
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: #efeae0;
+    }
+    h2 {
+      margin: 0;
+      font-size: clamp(1.55rem, 2.6vw, 2rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+    .section-lead {
+      margin: 0.7rem 0 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+      max-width: 40rem;
+    }
+
+    /* How it works */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.1rem;
+      margin: 2rem 0 0;
+      list-style: none;
+      padding: 0;
+      counter-reset: step;
+    }
+    .steps li {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 1.25rem 1.2rem 1.35rem;
+      counter-increment: step;
+    }
+    .steps li::before {
+      content: counter(step);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.7rem;
+      height: 1.7rem;
+      margin-bottom: 0.7rem;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #fffdf8;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+    .steps h3 {
+      margin: 0 0 0.4rem;
+      font-size: 1.08rem;
+    }
+    .steps p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.96rem;
+    }
+
+    /* Tiers */
+    .tiers {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.1rem;
+      margin: 2rem 0 0;
+      align-items: stretch;
+    }
+    .tier {
+      display: flex;
+      flex-direction: column;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1.45rem 1.35rem 1.4rem;
+    }
+    .tier.featured {
+      border-color: var(--accent);
+      box-shadow: 0 10px 28px rgba(28, 25, 21, 0.06);
+    }
+    .tier h3 {
+      margin: 0;
+      font-size: 1.28rem;
+    }
+    .tier .sub {
+      margin: 0.25rem 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .price {
+      margin: 1.05rem 0 0;
+      font-size: 2.05rem;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+    .price-inr {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+      font-weight: 500;
+    }
+    .meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin: 0.95rem 0 0.85rem;
+      padding: 0.65rem 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 500;
+    }
+    .tier ul {
+      margin: 0 0 1.2rem;
+      padding: 0;
+      list-style: none;
+      flex: 1;
+    }
+    .tier li {
+      position: relative;
+      padding: 0.42rem 0 0.42rem 1.15rem;
+      font-size: 0.96rem;
+    }
+    .tier li::before {
+      content: "–";
+      position: absolute;
+      left: 0;
+      color: var(--accent);
+    }
+    .tier .btn { width: 100%; margin-top: auto; }
+    .fine {
+      margin: 1.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      max-width: 52rem;
+    }
+
+    /* What you get / privacy */
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2.5rem;
+      align-items: start;
+      margin-top: 0.4rem;
+    }
+    .checks {
+      margin: 1.2rem 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    .checks li {
+      position: relative;
+      padding: 0.55rem 0 0.55rem 1.2rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .checks li:last-child { border-bottom: 0; }
+    .checks li::before {
+      content: "→";
+      position: absolute;
+      left: 0;
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1.35rem 1.4rem;
+    }
+    .panel h3 {
+      margin: 1.15rem 0 0.35rem;
+      font-size: 1.02rem;
+    }
+    .panel h3:first-child { margin-top: 0; }
+    .panel p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    .privacy-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.1rem;
+      margin: 2rem 0 0;
+    }
+    .privacy-grid article {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 1.2rem 1.25rem;
+    }
+    .privacy-grid h3 {
+      margin: 0 0 0.4rem;
+      font-size: 1.08rem;
+    }
+    .privacy-grid p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+
+    /* FAQ */
+    .faq {
+      max-width: 46rem;
+      margin: 1.6rem 0 0;
+    }
+    details {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.95rem 1.15rem;
+      margin-bottom: 0.65rem;
+    }
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: baseline;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::after {
+      content: "+";
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 1.2rem;
+      line-height: 1;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+    }
+    details[open] summary::after { content: "−"; }
+    details p {
+      margin: 0.7rem 0 0.15rem;
+      color: var(--muted);
+    }
+
+    /* Form */
+    #request.form-section { padding-bottom: 4rem; }
+    form {
+      margin: 1.6rem 0 0;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1.5rem 1.4rem 1.4rem;
+      max-width: 40rem;
+    }
+    .field { margin: 0 0 1rem; }
+    .field label,
+    .field .lbl {
+      display: block;
+      font-size: 0.88rem;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+    .hint {
+      display: block;
+      font-weight: 400;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    input[type="text"],
+    input[type="email"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 0.65rem 0.7rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      font-size: 1rem;
+    }
+    textarea { min-height: 7.5rem; resize: vertical; }
+    form .btn { margin-top: 0.3rem; }
+    .form-foot {
+      margin: 1rem 0 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    .form-status {
+      margin: 0.9rem 0 0;
+      font-size: 0.95rem;
+    }
+    .form-status.ok { color: #215c3a; }
+    .form-status.err { color: #8c3a2f; }
+
+    footer {
+      border-top: 1px solid var(--line);
+      padding: 1.8rem 0 2.2rem;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    footer .wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem 1.4rem;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    footer ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 1rem;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    footer p { margin: 0.35rem 0 0; max-width: 40rem; }
+
+    @media (max-width: 900px) {
+      .steps, .tiers, .split, .privacy-grid { grid-template-columns: 1fr; }
+      .steps { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 600px) {
+      .wrap { width: min(1080px, calc(100% - 1.5rem)); }
+      section { padding: 2.4rem 0; }
+      .hero { padding: 2.6rem 0 2rem; }
+      .steps { grid-template-columns: 1fr; }
+      nav .btn { padding: 0.55rem 0.8rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body data-form-endpoint="">
+  <!--
+    FORM_ENDPOINT
+    Set the data-form-endpoint attribute on <body> to the form service URL
+    (for example a Formspree endpoint) once it exists. Leave it empty until
+    then. While it is empty, submit falls back to mailto:team.tracetally@gmail.com
+    with the subject "Audit request" and the field values in the body.
+    Keep this comment and the data-form-endpoint value in sync.
+  -->
+
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="site">
+    <div class="wrap site-bar">
+      <a class="nav-brand" href="../">tracetally<span>Project home</span></a>
+      <nav aria-label="Page">
+        <ul>
+          <li><a href="#how">How it works</a></li>
+          <li><a href="#tiers">Tiers</a></li>
+          <li><a href="#privacy">Privacy</a></li>
+          <li><a href="#faq">FAQ</a></li>
+          <li><a class="btn btn-primary" href="#request">Request an audit</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="wrap">
+        <p class="kicker">LLM cost audits from the tracetally author</p>
+        <h1>LLM cost and reliability audits</h1>
+        <p class="tagline">Your LLM bill tells you the total. tracetally tells you why.</p>
+        <p class="lead">Arockia Reegan, author of the open-source tracetally CLI, works from usage and trace exports you already have. You get a ranked, quantified plan: where the token spend goes, what is wasted, what breaks, and what to fix first. Your team ships the fixes, or Arockia ships them in the third tier.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#request">Request an audit</a>
+          <a class="btn btn-ghost" href="#tiers">See the tiers</a>
+        </div>
+        <p class="hero-note">Work starts from exports you share. No production access is needed. The open-source CLI is <code class="code">pip install tracetally</code> · <a href="https://github.com/tracetally/tracetally">github.com/tracetally/tracetally</a></p>
+      </div>
+    </section>
+
+    <section id="how" class="alt">
+      <div class="wrap">
+        <p class="kicker">Process</p>
+        <h2>How it works</h2>
+        <p class="section-lead">Four steps, all from data you export. Nothing needs to sit in your request path.</p>
+        <ol class="steps">
+          <li>
+            <h3>Send exports</h3>
+            <p>Share read-only usage exports, traces (Langfuse, LangSmith, or OpenTelemetry), and redacted prompt templates. A mutual NDA is available before you send anything.</p>
+          </li>
+          <li>
+            <h3>I analyse</h3>
+            <p>Spend is broken down by model, feature and day, then reviewed against a nine-area methodology: routing, token bloat, caching, batching, RAG context, agent loops and retries, eval coverage, observability, and latency.</p>
+          </li>
+          <li>
+            <h3>Findings report, ranked by dollars saved</h3>
+            <p>Every finding comes with an estimated monthly saving or reliability gain, the effort to fix it, and the quality risk, so you know what to do first.</p>
+          </li>
+          <li>
+            <h3>Walkthrough call</h3>
+            <p>A readout walks your team through the plan. Quick Review includes a 30-minute call; Full Audit and Implementation include a 60-minute session.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="tiers">
+      <div class="wrap">
+        <p class="kicker">Services</p>
+        <h2>Three fixed-fee tiers</h2>
+        <p class="section-lead">USD prices are billed to non-Indian clients. INR prices are India-market prices, not a straight conversion.</p>
+
+        <div class="tiers">
+          <article class="tier">
+            <h3>Quick Review</h3>
+            <p class="sub">Where is the money going?</p>
+            <p class="price">$250</p>
+            <p class="price-inr">₹20,000</p>
+            <p class="meta"><span>About 7–10 days</span><span>1 provider</span></p>
+            <ul>
+              <li>Spend decomposition by model, endpoint or feature, and day, from one provider’s 30-day usage export</li>
+              <li>Review of up to 5 prompt templates for token bloat and caching eligibility</li>
+              <li>Top-5 findings, each with a rough monthly saving estimate</li>
+              <li>A 4–6 page PDF and a 30-minute readout</li>
+              <li>The Quick Review fee is credited in full against a Full Audit booked within 30 days</li>
+            </ul>
+            <a class="btn btn-ghost" href="#request">Request a Quick Review</a>
+          </article>
+
+          <article class="tier featured">
+            <h3>Full Audit</h3>
+            <p class="sub">Cost and reliability, end to end</p>
+            <p class="price">$1,200</p>
+            <p class="price-inr">₹80,000</p>
+            <p class="meta"><span>About 3–4 weeks</span><span>Up to 3 providers</span></p>
+            <ul>
+              <li>Everything in Quick Review, across up to 3 providers or model families</li>
+              <li>Trace-level analysis covering token distributions, cache-hit rates, retry and loop detection, and p50/p95/p99 latency</li>
+              <li>The full methodology checklist, including RAG, eval coverage and observability gaps</li>
+              <li>Optional read-only review of the code paths that build prompts and call LLMs</li>
+              <li>Model-routing recommendations, checked with an offline replay on a small, redacted sample</li>
+              <li>A 15–25 page report, a savings and reliability scorecard, and a 30/60/90-day roadmap</li>
+              <li>A 60-minute readout and two weeks of async Q&amp;A by email</li>
+            </ul>
+            <a class="btn btn-primary" href="#request">Request a Full Audit</a>
+          </article>
+
+          <article class="tier">
+            <h3>Audit + Implementation</h3>
+            <p class="sub">Find it, fix it, prove it</p>
+            <p class="price">$3,000</p>
+            <p class="price-inr">₹2,20,000</p>
+            <p class="meta"><span>About 8–10 weeks</span><span>Top 3–5 fixes</span></p>
+            <ul>
+              <li>Everything in Full Audit</li>
+              <li>The top 3–5 agreed fixes as pull requests your engineers review and merge</li>
+              <li>Typical work includes prompt caching, batch APIs, prompt and context trimming, retry budgets and loop caps, model selection with evals, a small eval harness, and cost or latency dashboards in your existing tools</li>
+              <li>Before/after measurement over a 2–4 week window</li>
+              <li>A runbook and a 60-minute handover</li>
+            </ul>
+            <a class="btn btn-ghost" href="#request">Request Implementation</a>
+          </article>
+        </div>
+
+        <p class="fine">Extra hours and change requests: $60/hr / ₹4,000/hr. Timelines start when the data is received. Prices exclude applicable taxes (including GST for Indian clients).</p>
+      </div>
+    </section>
+
+    <section id="deliverables" class="alt">
+      <div class="wrap split">
+        <div>
+          <p class="kicker">Deliverables</p>
+          <h2>What you get</h2>
+          <p class="section-lead">A plan both engineering and finance can read. Scope follows the tier you book; the Full Audit is listed in full below.</p>
+          <ul class="checks">
+            <li>A written report: 4–6 pages for a Quick Review, or 15–25 pages for a Full Audit</li>
+            <li>Spend breakdown by provider, model, endpoint or feature, and time</li>
+            <li>Findings ranked by estimated monthly saving or reliability gain, with effort, quality risk and confidence</li>
+            <li>For a Full Audit: a savings and reliability scorecard, and a prioritised 30/60/90-day roadmap</li>
+            <li>A walkthrough call (30 or 60 minutes, by tier), recorded on request</li>
+            <li>Two weeks of async Q&amp;A by email after a Full Audit readout</li>
+            <li>For Implementation: merge-ready pull requests, a before/after report, a runbook and a handover call</li>
+          </ul>
+        </div>
+        <aside class="panel" aria-label="How findings are sized">
+          <h3>Each finding includes</h3>
+          <p>Evidence from your exports, an estimated monthly dollar impact, the effort to fix it, the quality risk, and a confidence note.</p>
+          <h3>Methodology checklist</h3>
+          <p>Model choice and routing, prompt and token bloat, caching, batching, RAG retrieval and context size, agent loops and retries, eval coverage, observability gaps, and rate limits and latency.</p>
+          <h3>What stays out of scope</h3>
+          <p>Production deploys (your team deploys), on-call support, vendor negotiations, model fine-tuning, security or compliance certification, and any access to production systems or raw customer personal data. Work beyond the agreed list is a change request at the hourly rate.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section id="privacy">
+      <div class="wrap">
+        <p class="kicker">Data handling</p>
+        <h2>Privacy</h2>
+        <p class="section-lead">The work uses exports you share. A mutual NDA is available. No access to production is needed.</p>
+        <div class="privacy-grid">
+          <article>
+            <h3>Exports, not production</h3>
+            <p>Analysis is done offline from usage CSVs, trace exports and redacted prompts you provide. Live traffic is not intercepted, and production systems are not accessed. For Implementation, write access is limited to feature branches and pull requests that your team reviews and merges.</p>
+          </article>
+          <article>
+            <h3>NDA first, if you want one</h3>
+            <p>A mutual non-disclosure agreement is available before you share data. If you already have an NDA or data-processing agreement, that can be used after review.</p>
+          </article>
+          <article>
+            <h3>Redact personal data</h3>
+            <p>Please redact or pseudonymize end-user personal data before sharing, and share prompt or response content only where it is needed and already redacted. Unexpected personal data is deleted and you are notified.</p>
+          </article>
+          <article>
+            <h3>Stored privately, then deleted</h3>
+            <p>Data is kept only on encrypted personal storage, is not uploaded to third-party AI services for training, and is not shared with third parties. All client data and copies are deleted within 14 days of the final deliverable, or earlier on request, with written confirmation.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" class="alt">
+      <div class="wrap">
+        <p class="kicker">Questions</p>
+        <h2>FAQ</h2>
+        <div class="faq">
+          <details open>
+            <summary>What data do I need to share?</summary>
+            <p>For a Quick Review: a 30-day usage export from one provider console, up to five production prompt templates with customer data redacted, and a short note on which features call which models. For a Full Audit, add usage exports for each provider, a trace export (Langfuse, LangSmith, or OpenTelemetry spans), prompts for the top endpoints by spend, and an optional read-only look at the relevant code paths. A short kickoff call with the tech lead is part of the Full Audit.</p>
+          </details>
+          <details>
+            <summary>How is our data handled?</summary>
+            <p>A mutual NDA is available first. Access is read-only, except for feature-branch pull requests in the Implementation tier. Please redact personal data before sharing. Data stays on encrypted personal storage, is analysed with offline tooling, is not used to train anything, and is deleted within 14 days of the final deliverable, with written confirmation.</p>
+          </details>
+          <details>
+            <summary>Do you need access to production?</summary>
+            <p>No. Production systems are not accessed, and live traffic is not intercepted. Everything starts from exports you share. In Audit + Implementation, pull requests are opened on feature branches; your team reviews, merges and deploys.</p>
+          </details>
+          <details>
+            <summary>How long does an engagement take?</summary>
+            <p>Quick Review takes about 7–10 days, a Full Audit about 3–4 weeks, and Audit + Implementation about 8–10 weeks, counted from when the data is received.</p>
+          </details>
+          <details>
+            <summary>Who is this a good fit for?</summary>
+            <p>Teams with an LLM feature in production (chat, RAG, agents, or extraction) and some form of logging or tracing. The usual fit is monthly LLM API spend of about $1,500 to $50,000 (₹1.5L to ₹45L). Below about $1,000 a month, the fee rarely pays back, and that will be said plainly on the intro call.</p>
+          </details>
+          <details>
+            <summary>How does payment work?</summary>
+            <p>Quick Review is 100% upfront. Full Audit is 50% at kickoff and 50% on delivery of the report. Audit + Implementation is 40% at kickoff, 30% at the audit report, and 30% at handover. International clients are invoiced in USD; Indian companies in INR. Prices exclude applicable taxes (including GST for Indian clients).</p>
+          </details>
+          <details>
+            <summary>Will model or routing changes put quality at risk?</summary>
+            <p>Routing recommendations are checked with an offline replay on a small, redacted sample, and against your evals when you have them. Where there are no evals, a small golden set can be part of the plan. Some changes, such as enabling caching or moving asynchronous jobs to a batch API, do not change model outputs.</p>
+          </details>
+          <details>
+            <summary>What if we need work beyond the agreed scope?</summary>
+            <p>Work beyond the agreed fix list is a change request at $60/hr / ₹4,000/hr. Production deploys stay with your team. The Quick Review fee is credited in full against a Full Audit booked within 30 days.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section id="request" class="form-section">
+      <div class="wrap">
+        <p class="kicker">Get in touch</p>
+        <h2>Request an audit</h2>
+        <p class="section-lead">Tell Arockia a little about your stack and spend. He replies by email to schedule a call. There is no booking calendar.</p>
+
+        <form
+          id="audit-form"
+          action="mailto:team.tracetally@gmail.com?subject=Audit%20request"
+          method="post"
+          enctype="text/plain">
+          <div class="field">
+            <label for="name">Name</label>
+            <input id="name" name="Name" type="text" autocomplete="name" required>
+          </div>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="Email" type="email" autocomplete="email" required>
+          </div>
+          <div class="field">
+            <label for="company">Company <span class="hint">Optional</span></label>
+            <input id="company" name="Company" type="text" autocomplete="organization">
+          </div>
+          <div class="field">
+            <label for="spend">Monthly LLM spend <span class="hint">Optional</span></label>
+            <select id="spend" name="Monthly LLM spend">
+              <option value="">Select a range</option>
+              <option>Under $1,000</option>
+              <option>$1,000–$3,000</option>
+              <option>$3,000–$10,000</option>
+              <option>$10,000–$50,000</option>
+              <option>Over $50,000</option>
+              <option>Prefer not to say</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="need">What you need</label>
+            <textarea id="need" name="What you need" required placeholder="Stack, providers, and what you want from a review, audit, or implementation."></textarea>
+          </div>
+          <div class="field">
+            <label for="times">Preferred times for a call <span class="hint">Optional. Time zone helpful.</span></label>
+            <input id="times" name="Preferred times for a call" type="text" autocomplete="off">
+          </div>
+          <button class="btn btn-primary" type="submit">Send request</button>
+          <p class="form-foot">Or email <a href="mailto:team.tracetally@gmail.com?subject=Audit%20request">team.tracetally@gmail.com</a> directly. Arockia will reply by email to schedule.</p>
+          <p id="form-status" class="form-status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div>
+        <strong style="color:var(--ink);font-family:inherit;font-size:1rem;">tracetally</strong>
+        <p>LLM cost audits from the author of the open-source CLI.</p>
+        <p>Prices exclude applicable taxes (including GST for Indian clients).</p>
+      </div>
+      <ul>
+        <li><a href="../">Project home</a></li>
+        <li><a href="https://github.com/tracetally/tracetally">GitHub</a></li>
+        <li><a href="../"><code class="code">pip install tracetally</code></a></li>
+        <li><a href="mailto:team.tracetally@gmail.com">team.tracetally@gmail.com</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var form = document.getElementById("audit-form");
+      if (!form) return;
+      var status = document.getElementById("form-status");
+      var mail = "team.tracetally@gmail.com";
+      var endpoint = (document.body.getAttribute("data-form-endpoint") || "").trim();
+
+      function fieldValue(id) {
+        var el = document.getElementById(id);
+        return el ? (el.value || "").trim() : "";
+      }
+
+      function bodyText() {
+        return [
+          "Name: " + fieldValue("name"),
+          "Email: " + fieldValue("email"),
+          "Company: " + fieldValue("company"),
+          "Monthly LLM spend: " + fieldValue("spend"),
+          "What you need:",
+          fieldValue("need"),
+          "",
+          "Preferred times for a call: " + fieldValue("times")
+        ].join("\n");
+      }
+
+      form.addEventListener("submit", function (event) {
+        if (endpoint) {
+          form.setAttribute("action", endpoint);
+          form.setAttribute("method", "post");
+          form.removeAttribute("enctype");
+          return;
+        }
+        event.preventDefault();
+        if (typeof form.reportValidity === "function" && !form.reportValidity()) return;
+        var url = "mailto:" + mail +
+          "?subject=" + encodeURIComponent("Audit request") +
+          "&body=" + encodeURIComponent(bodyText());
+        window.location.href = url;
+        if (status) {
+          status.className = "form-status ok";
+          status.textContent = "Your email app should open with the request filled in. If it does not, write to " + mail + ".";
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
