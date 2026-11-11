@@ -7,6 +7,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from tests.support.factories import call_record, write_jsonl_records
@@ -201,3 +202,47 @@ def test_missing_file_is_a_warning(tmp_path: Path) -> None:
     assert loaded.files == []
     assert any("file skipped" in warning for warning in loaded.store.warnings)
     assert dropped_message(2) == "dropped 2 duplicate records"
+
+
+def test_explicit_symlink_file_and_ancestor_are_not_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = tmp_path / "real"
+    write_jsonl_records(
+        real / "nested",
+        [call_record(record_id="through-ancestor")],
+        name="secret.jsonl",
+    )
+    target = write_jsonl_records(
+        real, [call_record(record_id="through-file-link")], name="plain.jsonl"
+    )
+    ordinary = write_jsonl_records(
+        tmp_path, [call_record(record_id="ordinary")], name="ordinary.jsonl"
+    )
+    try:
+        alias = tmp_path / "alias.jsonl"
+        alias.symlink_to(target)
+        linkparent = tmp_path / "linkparent"
+        linkparent.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available")
+
+    from tracetally.readers.base import file_sha256
+
+    opened: list[str] = []
+
+    def tracking(path: Path) -> str:
+        opened.append(str(path))
+        return file_sha256(path)
+
+    monkeypatch.setattr("tracetally.readers.dedup.file_sha256", tracking)
+    loaded = load_deduped(
+        [alias, linkparent / "nested" / "secret.jsonl", ordinary],
+        ReaderConfig(),
+    )
+    assert loaded.store.record_id == ["ordinary"]
+    assert opened == [str(ordinary)]
+    assert {note.path: note.reason for note in loaded.skipped} == {
+        "alias.jsonl": "symlink",
+        "linkparent": "symlink",
+    }

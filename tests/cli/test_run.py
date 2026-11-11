@@ -242,6 +242,53 @@ def test_run_rejects_a_symlink_root_and_ancestor(tmp_path: Path) -> None:
     assert not out.exists()
 
 
+def test_run_does_not_read_an_explicit_symlink_file(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    write_jsonl_records(
+        real / "nested",
+        [call_record(record_id="through-ancestor")],
+        name="secret.jsonl",
+    )
+    target = write_jsonl_records(
+        real, [call_record(record_id="through-file-link")], name="plain.jsonl"
+    )
+    ordinary = write_jsonl_records(
+        tmp_path, [call_record(record_id="ordinary")], name="ordinary.jsonl"
+    )
+    try:
+        alias = tmp_path / "alias.jsonl"
+        alias.symlink_to(target)
+        linkparent = tmp_path / "linkparent"
+        linkparent.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available")
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(alias),
+            str(linkparent / "nested" / "secret.jsonl"),
+            str(ordinary),
+            "--offline",
+            "--out",
+            str(out),
+            "--no-open",
+        ],
+    )
+    assert result.exit_code == EXIT_OK, result.output
+    assert "alias.jsonl: symlink" in result.stdout
+    assert "linkparent: symlink" in result.stdout
+    payload = json.loads((out / "findings.json").read_text(encoding="utf-8"))
+    assert payload["totals"]["calls"] == 1
+    assert payload["inputs"][0]["records"] == 1
+    joined = " ".join(item["path"] for item in payload["inputs"])
+    assert "ordinary.jsonl" in joined
+    assert "secret.jsonl" not in joined
+    assert "alias.jsonl" not in joined
+    assert "plain.jsonl" not in joined
+
+
 def test_empty_directory_argument_prints_the_guide(tmp_path: Path) -> None:
     empty = tmp_path / "exports"
     empty.mkdir()

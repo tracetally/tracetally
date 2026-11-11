@@ -14,7 +14,7 @@ from tracetally.core.errors import ReaderError
 from tracetally.core.schema import LLMCall, Span
 from tracetally.core.store import TraceStore
 from tracetally.readers.base import _load_one, file_sha256
-from tracetally.readers.discover import SkipNote, relative_display
+from tracetally.readers.discover import SkipNote, _blocking_symlink, relative_display
 
 
 @dataclass(frozen=True)
@@ -73,6 +73,10 @@ def load_deduped(paths: Sequence[Path], cfg: ReaderConfig) -> DedupResult:
     request id, span id, or trace id was already seen in an earlier file.
     The same ids inside one file are kept. Similar files that share no ids
     are kept and named in ``overlap``.
+
+    A path that is a symlink, or that has a symlink ancestor, is skipped
+    before it is opened. ``summary``, ``analyze``, and ``report`` do not use
+    this loader.
     """
     store = TraceStore()
     files: list[LoadedFile] = []
@@ -84,6 +88,10 @@ def load_deduped(paths: Sequence[Path], cfg: ReaderConfig) -> DedupResult:
     dropped = 0
 
     for path in paths:
+        blocked = _blocking_symlink(path)
+        if blocked is not None:
+            skipped.append(SkipNote(blocked.name or str(path), "symlink"))
+            continue
         label = _label(path)
         key = os.path.normcase(os.path.abspath(path))
         if key in seen_path:
