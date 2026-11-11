@@ -34,11 +34,14 @@ ANALYZE_METHODOLOGY = (
     "Monthly dollars are observed dollars × (30 / window days), with a 1-day floor. "
     "Token bloat uses adoption 25/50/75%. Cache opportunity uses hit rates 50/75/90% "
     "on tokens that are not already cached. Batch candidates use 50/75/100% of calls "
-    "movable, and the batch price follows the price file's batch_cached rule rather "
-    "than halving every token. Retry waste and agent loops are observed spend, so "
-    "low, mid, and high match. Model swap is a what-if: price only, validate quality "
-    "with evals. It is not added to the savings total."
+    "movable, and the batch price is the published batch rate rather than a flat "
+    "half of every token. Retry waste and agent loops are observed spend, so "
+    "low, mid, and high match. Those savings are estimates: they are repriced from "
+    "token counts and list rates, not from a billed cost. Model swap is a what-if: "
+    "price only, validate quality with evals. It is not added to the savings total."
 )
+
+_ESTIMATE_CAVEAT = "Estimate: repriced from token counts and list rates, not from a billed cost."
 
 
 @dataclass
@@ -71,6 +74,10 @@ class Analysis:
             "tracetally_version": __version__,
             "price_table_id": self.summary.price_table_id,
             "price_table_retrieved_on": self.summary.price_table_retrieved_on,
+            "price_source": self.summary.price_source,
+            "price_url": self.summary.price_url,
+            "price_sha256": self.summary.price_sha256,
+            "priced_share": self.summary.priced_share,
             "currency": self.summary.currency,
             "methodology": METHODOLOGY + " " + ANALYZE_METHODOLOGY,
             "monthly": {
@@ -82,7 +89,9 @@ class Analysis:
             "totals": {
                 "calls": self.summary.calls,
                 "priced_calls": self.summary.priced_calls,
+                "priced_share": self.summary.priced_share,
                 "observed_cost_usd": _money(self.summary.cost_usd),
+                "list_cost_usd": _money(self.summary.list_cost_usd),
                 "est_monthly_savings_usd": _range_sum(savings),
                 "est_monthly_what_if_usd": _range_sum(what_ifs),
             },
@@ -108,10 +117,13 @@ class Analysis:
         summary = self.summary
         console.print(
             f"tracetally {__version__} analyze  "
-            f"price table {summary.price_table_id} (retrieved {summary.price_table_retrieved_on})"
+            f"prices {summary.price_source} retrieved {summary.price_table_retrieved_on}  "
+            f"{summary.price_url}"
         )
+        console.print(f"sha256 {summary.price_sha256}")
         console.print(
-            f"calls {summary.calls}  priced {summary.priced_calls}/{summary.calls}  "
+            f"calls {summary.calls}  priced {summary.priced_calls}/{summary.calls} "
+            f"({summary.priced_share})  "
             f"observed cost {format_usd(summary.cost_usd)} {summary.currency}  "
             f"monthly factor {_money(self.monthly_factor)}"
         )
@@ -159,7 +171,10 @@ class Analysis:
             console.print()
         console.print(METHODOLOGY)
         console.print(ANALYZE_METHODOLOGY)
-        console.print("Offline. No network calls. No telemetry.")
+        console.print(
+            f"No telemetry. Prices {summary.price_source} ({summary.price_table_retrieved_on}). "
+            "tracetally is not a proxy, gateway, or middleware."
+        )
         return buffer.getvalue()
 
 
@@ -179,6 +194,11 @@ def analyze(store: TraceStore, table: PriceTable, cfg: AnalyzeConfig | None = No
             skipped.append(SkippedCheck(check=check.id, reason=reason))
             continue
         findings.extend(check.run(store, table, selected))
+    for item in findings:
+        if item.check in RELIABILITY_CHECKS or _zero(item):
+            continue
+        if _ESTIMATE_CAVEAT not in item.caveats:
+            item.caveats.append(_ESTIMATE_CAVEAT)
     findings.sort(key=_rank)
     return Analysis(
         summary=summary,

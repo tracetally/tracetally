@@ -231,7 +231,7 @@ is accepted too, but one object per line is what streams.
 | `cached_input_tokens`, `reasoning_tokens` | no | Cached tokens use the cached price when one is published. Reasoning tokens are shown and are not added on top of `output_tokens`. |
 | `http_status`, `error_type`, `status` | no | `429` and `5xx` drive the error rates. |
 | `is_batch` | no | Applies the provider batch discount from the price file when that discount is published. |
-| `reported_cost_usd` | no | Shown separately from the computed cost. |
+| `reported_cost_usd` | no | Billed cost. Used instead of the inferred list price when present. |
 | `prompt`, `messages`, `input`, `output` | no | Hashed, then discarded. |
 | `trace_id`, `parent_id`, `user_id`, `session_id` | no | Group retries, loops, and batch candidates. |
 | `interactive` | no | `false` on every call marks an endpoint as a batch candidate. |
@@ -291,8 +291,8 @@ reader accepts the Usage and Costs API names plus aliases (`date`,
 row's request total. `input_tokens`
 includes cached tokens. Audio token columns are ignored, not folded into the
 text counts. `amount_cents` is rejected rather than converted. A non-USD
-currency is skipped. A cost with no token counts is kept, with tokens recorded
-as 0 and `reported_cost_usd` preserved.
+currency is skipped. A cost with no token counts is kept. The token counts
+are left unknown and are not estimated; the billed cost is the call's cost.
 
 The reader declares no capabilities. A run that only loads this format is
 cost-only: there is no latency, trace tree, prompt hash, or error status to
@@ -300,61 +300,47 @@ check.
 
 ## Prices
 
-`src/tracetally/pricing/data/prices-2026-10.yaml` is the bundled list-price
-table for OpenAI, Anthropic, and Gemini, retrieved 2026-10-22 from each
-provider's pricing page. Every model price and every batch discount has
-`source_url` and `retrieved_on`. `tracetally prices` prints the loaded rows,
-including cached-input and reasoning rates. `reasoning`, when set, is the
-published output rate for models that bill thinking tokens as output. It is
-not added again on top of `output_tokens`. Anthropic does not publish a
-separate reasoning rate, so those rows leave it unset. Models whose page
-did not give one verifiable text rate are omitted: OpenAI ids with a "272K"
-split and no integer threshold, Gemini prices that change on a later date,
-and Anthropic names that are not a confirmed API id. `gpt-3.5-turbo-1106` is
-not on the OpenAI page and is not listed.
+Prices come from LiteLLM's MIT-licensed
+`model_prices_and_context_window.json`. The only network request tracetally
+makes is one HTTPS GET of
 
-Resolution is exact id, then alias, then one trailing date suffix
-(`-YYYY-MM-DD`, `-YYYYMMDD`, `@YYYY…`). There is no prefix match, so an unknown
-model stays unpriced and the summary says so. Azure OpenAI and Vertex AI are
-not priced from these lists. `--prices yours.yaml` merges over the bundled
-table and your entries win. A user price still needs `source_url` and
-`retrieved_on`.
+`https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`
 
-Long-context rates apply only where the file publishes a token threshold
-(`gemini-2.5-pro` and `gemini-3.1-pro-preview` above 200k input tokens,
-`claude-haiku-5-5` above 100k).
-Audio-specific, priority, flex, and regional uplifts are not applied.
+with user agent `tracetally/<version>`, no query string, no body, and no
+cookies. `HTTPS_PROXY` is honored. `--offline` reads the bundled snapshot and
+does not open a socket. Otherwise a cache younger than 24 hours is used; a
+failed fetch (timeout, HTTP error, bad JSON, schema change) falls back to a
+stale cache, then the snapshot. Reports record the source, URL, date, and
+sha256. The LiteLLM MIT license is in `NOTICE`.
 
-A batch discount is not a flat 50% of the whole cost. It multiplies uncached
-input and output. Cached tokens are multiplied only when that model's
-`batch_cached` rule is `stack`. The bundled table, checked against the
-publisher pages on 2026-10-22:
+`tracetally.toml` holds `[aliases]`, custom prices per 1M tokens, `[discounts]`,
+and a static `currency` / `fx_rate`. `--discount 0.1` (or the config) prints
+list and effective prices. There is no FX lookup.
 
-- OpenAI's batch table publishes a cached-input rate at half the standard
-  cached rate for `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-5.1`, `gpt-5.2`,
-  `gpt-5.4-mini`, and `gpt-5.4-nano`, so those models stack. Other OpenAI rows
-  in this file show "-" in that column (`gpt-4o`, `gpt-4.1`, the o-series,
-  `gpt-5-pro`, `gpt-5.2-pro`). Their cached tokens stay at the standard
-  cached-input price. https://developers.openai.com/api/docs/pricing
-- Anthropic says prompt-caching multipliers stack with the 50% Message Batches
-  discount, including cache reads. https://platform.claude.com/docs/en/build-with-claude/batch-processing
-- Gemini 2.5, `gemini-3-flash-preview`, and `gemini-3.1-pro-preview` keep the
-  standard context-caching price on a batch cache hit. `gemini-3.1-flash-lite`
-  publishes a batch cache price at half the standard cache price, so that
-  model stacks. `gemini-3.5-flash-lite` publishes a batch cache price of
-  $0.02, which is neither the standard $0.03 nor half of it, so those cached
-  tokens stay at $0.03. https://ai.google.dev/gemini-api/docs/pricing and
-  https://ai.google.dev/gemini-api/docs/batch-api
+Matching order: exact id, provider prefix, LiteLLM `alias_of`, a stripped
+date or snapshot suffix (labelled approx.), then a user alias. OpenAI `ft:`
+ids use a listed fine-tune price when one exists, otherwise the base model
+marked estimate. Bedrock region prefixes and Vertex `@date` names are priced
+for the provider that billed.
 
-List prices and the batch-times-cache rule were retrieved 2026-10-22. No rate
-in the file was invented to fill a blank.
+OpenAI and Gemini input counts include cache reads; those reads are subtracted
+once and priced at the cache rate. Anthropic input counts exclude cache reads
+and cache writes, so those are priced separately, and a cache write uses
+LiteLLM's `cache_creation_input_token_cost` when it is published. An export
+with no cache fields is not given any. An
+over-200k rate applies to that request only. Batch, priority, and flex rates
+apply only when the export shows that tier. A billed cost in the export wins.
+Missing token counts are not filled in. A zero list price (including
+`ollama/*`) and self-hosted names (vLLM, Ollama, TGI, NIM, Hugging Face
+`org/model`, localhost) are cost unknown; other checks still run. The summary
+shows the share of calls that were priced.
 
 ## What is read
 
 tracetally reads only the paths you pass:
 
 - the trace files on the command line
-- an optional `--prices` YAML file, merged over the bundled table
+- an optional `tracetally.toml` or `--pricing-config` file (aliases, prices, discounts, FX)
 - an optional `--tier-map` YAML file
 - an optional `--config` YAML file of check thresholds
 

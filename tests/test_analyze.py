@@ -27,6 +27,7 @@ from tracetally.config import (
     load_check_params,
     load_tier_map,
 )
+from tracetally.core.cache import cache_accounting
 from tracetally.core.errors import UsageError
 from tracetally.core.schema import Capability, LLMCall, Status
 from tracetally.core.store import TraceStore
@@ -88,7 +89,7 @@ def test_planted_issues_match_and_control_is_clean(tmp_path: Path) -> None:
         assert CANARY not in text
         assert CANARY not in payload
         assert _WHAT_IF in text
-        assert "Offline. No network calls. No telemetry." in text
+        assert "No telemetry." in text
         document = json.loads(payload)
         assert document["analyze_schema_version"] == 1
         assert document["totals"]["est_monthly_savings_usd"]["mid"] == "0.02379"
@@ -96,6 +97,8 @@ def test_planted_issues_match_and_control_is_clean(tmp_path: Path) -> None:
         swap = next(item for item in document["findings"] if item["check"] == "model_swap")
         assert swap["what_if"] is True
         assert _WHAT_IF in swap["recommendation"]
+        bloat = next(item for item in document["findings"] if item["check"] == "token_bloat")
+        assert any("repriced from token counts" in caveat for caveat in bloat["caveats"])
         assert all(
             item["what_if"] is False
             for item in document["findings"]
@@ -355,7 +358,7 @@ def test_analyze_command_json_skips_and_exit_codes(tmp_path: Path) -> None:
     )
     assert machine.exit_code == 0, machine.output
     payload = json.loads(machine.stdout or machine.output)
-    assert payload["totals"]["observed_cost_usd"] == "0.27241"
+    assert payload["totals"]["observed_cost_usd"] == "0.29241"
     assert not any(item["check"] == "token_bloat" for item in payload["findings"])
     assert any(
         item["check"] == "token_bloat" and item["reason"] == "skipped with --skip"
@@ -460,4 +463,13 @@ def _llm(**overrides: object) -> LLMCall:
         "attrs": {},
     }
     fields.update(overrides)
+    if "cache_accounting" not in fields:
+        cached = fields.get("cached_input_tokens")
+        created = fields.get("cache_creation_tokens")
+        has_cache = cached not in (None, 0) or created not in (None, 0)
+        fields["cache_accounting"] = cache_accounting(
+            str(fields["provider"]),
+            str(fields["model"]),
+            has_cache=bool(has_cache),
+        )
     return LLMCall.model_construct(**fields)  # type: ignore[arg-type]

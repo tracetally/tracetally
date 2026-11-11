@@ -74,6 +74,11 @@ class LLMCall(BaseModel):
     input_tokens: int = Field(ge=0)
     output_tokens: int = Field(ge=0)
     cached_input_tokens: int | None = Field(default=None, ge=0)
+    cache_creation_tokens: int | None = Field(default=None, ge=0)
+    # included: input_tokens contains cache reads (OpenAI, Gemini).
+    # separate: input_tokens excludes cache reads and cache writes (Anthropic).
+    # absent: the export had no cache fields.
+    cache_accounting: str = "absent"
     reasoning_tokens: int | None = Field(default=None, ge=0)
     request_count: int = Field(default=1, ge=1)
     status: Status
@@ -81,6 +86,9 @@ class LLMCall(BaseModel):
     error_type: str | None = None
     attempt: int | None = Field(default=None, ge=0)
     is_batch: bool | None = None
+    service_tier: str | None = None
+    base_url: str | None = None
+    tokens_known: bool = True
     interactive: bool | None = None
     prefix_hashes: tuple[tuple[int, str], ...] | None = None
     content_hash: str | None = None
@@ -176,7 +184,12 @@ class RunResult(BaseModel):
     show_footer: bool = True
     price_table_id: str
     price_table_retrieved_on: str
+    price_source: str = ""
+    price_url: str = ""
+    price_sha256: str = ""
+    priced_share: str = ""
     currency: str = "USD"
+    fx_rate: str = "1"
     methodology: str = ""
     monthly_factor: str = "1"
     monthly_caveats: list[str] = Field(default_factory=list)

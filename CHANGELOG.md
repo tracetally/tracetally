@@ -2,6 +2,29 @@
 
 ## 0.1.0.dev0
 
+Prices now come from LiteLLM's published price file, with a bundled snapshot
+for offline runs. Not a release.
+
+- The only network request is a GET of
+  `https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`.
+  `--offline` uses the bundled snapshot and opens no socket. A fresh cache
+  (under 24 hours) is reused; timeout, HTTP errors, bad JSON, and a schema
+  change fall back to a stale cache, then the snapshot.
+- Reports name the price source, URL, date, and sha256, and the share of
+  calls that were priced.
+- Model matching is exact, then provider prefix, LiteLLM `alias_of`, a
+  stripped date or snapshot suffix (`approx.`), then `[aliases]` in
+  `tracetally.toml`. OpenAI `ft:` ids use a listed fine-tune price, otherwise
+  the base price marked `estimate`.
+- Cached input is priced at the cache rate. The over-200k rate applies per
+  request. Batch, priority, and flex rates apply only when the export shows
+  that tier. A billed cost in the export wins over the inferred price.
+  Missing token counts are not estimated. A zero list price, including
+  `ollama/*`, and self-hosted endpoints are cost unknown.
+- `tracetally.toml` supplies aliases, per-model prices per 1M tokens,
+  discounts, and a static currency FX rate. `--discount` prints list and
+  effective prices. The hand-kept YAML table is retired.
+
 W4 reports and demo, on top of the W3 checks. Not a release.
 
 - `tracetally report` writes `report.md`, a single-file `report.html` (inline

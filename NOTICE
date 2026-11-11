@@ -12,3 +12,44 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+Third-party notices
+-------------------
+
+The bundled model price snapshot
+``src/tracetally/pricing/data/model_prices_and_context_window.json``
+is a copy of LiteLLM's ``model_prices_and_context_window.json``, retrieved
+2026-11-10 from
+https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+(project https://github.com/BerriAI/litellm). That file is MIT-licensed.
+The license text below is included so it ships in the sdist and the wheel.
+
+Portions of the LiteLLM repository are licensed as follows:
+
+* All content that resides under the "enterprise/" directory of that
+  repository, if that directory exists, is licensed under the license
+  defined in "enterprise/LICENSE".
+* Content outside of the above mentioned directories or restrictions above
+  is available under the MIT license as defined below.
+
+MIT License
+
+Copyright (c) 2023 Berri AI
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

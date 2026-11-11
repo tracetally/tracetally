@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from tracetally.config import ReaderConfig
+from tracetally.core.cache import cache_accounting
 from tracetally.core.hashing import content_hash, hash_content_parts, retained_content
 from tracetally.core.schema import Capability, LLMCall, Span, SpanKind, Status
 from tracetally.readers.base import BaseReader
@@ -70,6 +71,12 @@ _CACHED_KEYS = (
     "cached_tokens",
     "input_cached_tokens",
     "cache_read",
+)
+_CACHE_WRITE_KEYS = (
+    "input_cache_creation",
+    "cache_creation_input_tokens",
+    "cache_creation",
+    "cache_write_input_tokens",
 )
 _REASONING_KEYS = (
     "output_reasoning",
@@ -149,7 +156,6 @@ class LangfuseReader(BaseReader):
     def __init__(self) -> None:
         super().__init__()
         self._loose_time = False
-        self._cache_adjusted = False
         self._derived_tokens = False
         self._reasoning_gap = False
         self._latency_seconds = False
@@ -382,7 +388,7 @@ class LangfuseReader(BaseReader):
         start = self._time(first(row, "start_time", "timestamp"), field="start_time")
         usage = as_object(first(row, "usage_details")) or as_object(first(row, "usage")) or {}
         self._reject_character_usage(row)
-        input_tokens, output_tokens, cached, reasoning = self._tokens(usage, row)
+        input_tokens, output_tokens, cached, created, reasoning = self._tokens(usage, row)
         end_raw = first(row, "end_time")
         end = self._time(end_raw, field="end_time") if end_raw is not None else None
         duration = _duration_ms(start, end, row, self)
@@ -397,6 +403,8 @@ class LangfuseReader(BaseReader):
         content = retained_content(input_parts) if cfg.include_content else None
         reported = _reported_cost(row)
         batch = _flag(first(meta, "is_batch", "batch"))
+        service_tier = _text(first(meta, "service_tier", "tier"))
+        base_url = _text(first(meta, "base_url", "api_base"))
         tag_values = first(row, "tags")
         if tag_values is None and context:
             tag_values = context.get("tags")
@@ -406,6 +414,12 @@ class LangfuseReader(BaseReader):
             model,
             first(meta, "provider", "gen_ai_provider_name", "gen_ai_system", "model_provider")
             or first(row, "provider"),
+        )
+        accounting = cache_accounting(
+            provider,
+            model,
+            has_cache=cached is not None or created is not None,
+            source="langfuse",
         )
         return LLMCall.model_construct(
             source="langfuse",
@@ -423,6 +437,8 @@ class LangfuseReader(BaseReader):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_input_tokens=cached,
+            cache_creation_tokens=created,
+            cache_accounting=accounting,
             reasoning_tokens=reasoning,
             request_count=1,
             status=status,
@@ -430,6 +446,9 @@ class LangfuseReader(BaseReader):
             error_type=error_type if status is Status.ERROR else None,
             attempt=None,
             is_batch=batch,
+            service_tier=service_tier.casefold() if service_tier else None,
+            base_url=base_url,
+            tokens_known=True,
             interactive=_flag(first(meta, "interactive")),
             prefix_hashes=prefixes or None,
             content_hash=digest,
@@ -476,7 +495,7 @@ class LangfuseReader(BaseReader):
 
     def _tokens(
         self, usage: dict[str, Any], row: dict[str, Any]
-    ) -> tuple[int, int, int | None, int | None]:
+    ) -> tuple[int, int, int | None, int | None, int | None]:
         incoming = _token(usage, _INPUT_KEYS, "input_tokens")
         if incoming is None:
             incoming = _token(row, ("input_tokens", "prompt_tokens"), "input_tokens")
@@ -505,14 +524,13 @@ class LangfuseReader(BaseReader):
                 ("cached_input_tokens", "input_cached_tokens"),
                 "cached_input_tokens",
             )
-        if cached is not None and cached > incoming:
-            incoming = incoming + cached
-            if not self._cache_adjusted:
-                self._cache_adjusted = True
-                self.warn(
-                    "cached tokens exceeded input tokens; input was treated as the "
-                    "uncached portion and the cached count was added"
-                )
+        created = _token(usage, _CACHE_WRITE_KEYS, "cache_creation_input_tokens")
+        if created is None:
+            created = _token(
+                row,
+                ("cache_creation_input_tokens", "cache_creation_tokens"),
+                "cache_creation_input_tokens",
+            )
         reasoning = _token(usage, _REASONING_KEYS, "reasoning_tokens")
         if reasoning is None:
             reasoning = _token(
@@ -526,7 +544,7 @@ class LangfuseReader(BaseReader):
                 "reasoning tokens exceed output tokens; they were kept separate and "
                 "were not added on top of output tokens"
             )
-        return incoming, outgoing, cached, reasoning
+        return incoming, outgoing, cached, created, reasoning
 
     def _note_derived(self) -> None:
         if not self._derived_tokens:

@@ -81,9 +81,9 @@ jobs:
         run: |
           python -m venv /tmp/tt
           /tmp/tt/bin/pip install dist/*.whl
-          /tmp/tt/bin/tracetally summary examples/synthetic_otel.json
-          /tmp/tt/bin/tracetally summary examples/synthetic.jsonl --json
-          /tmp/tt/bin/tracetally demo --out /tmp/tt-demo --seed 1
+          /tmp/tt/bin/tracetally summary examples/synthetic_otel.json --offline
+          /tmp/tt/bin/tracetally summary examples/synthetic.jsonl --json --offline
+          /tmp/tt/bin/tracetally demo --out /tmp/tt-demo --seed 1 --offline
           test -s /tmp/tt-demo/report.html
           test -s /tmp/tt-demo/report.md
           test -s /tmp/tt-demo/findings.json
