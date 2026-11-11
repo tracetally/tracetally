@@ -152,9 +152,11 @@ def test_run_directory_follows_umask_and_prints_price_warnings(tmp_path: Path) -
     warnings = result.stderr or result.output
     assert "unknown key" in warnings
     assert "surprise" in warnings
-    current = os.umask(0)
-    os.umask(current)
-    assert (out.stat().st_mode & 0o777) == (0o755 & ~current & 0o777)
+    assert out.is_dir()
+    if os.name == "posix":
+        current = os.umask(0)
+        os.umask(current)
+        assert (out.stat().st_mode & 0o777) == (0o755 & ~current & 0o777)
 
 
 def test_run_strips_terminal_controls_from_names(tmp_path: Path) -> None:
