@@ -1,4 +1,0 @@
-start_time,model,project_id,num_model_requests,input_tokens,output_tokens,input_cached_tokens,output_reasoning_tokens,batch,service_tier,notes
-2026-10-01T00:00:00Z,gpt-4o-mini,proj_a,10,1000000,2000,200000,0,false,default,extra-note
-1727740800,gpt-4o,proj_b,2,0,1000,0,0,true,default,also-extra
-not-a-date,gpt-4o-mini,proj_a,1,10,10,0,0,false,default,bad-row

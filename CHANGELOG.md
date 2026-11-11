@@ -2,6 +2,12 @@
 
 ## 0.1.0.dev0
 
+`tracetally run` reads the files you name, prices them, and writes
+`findings.json`, `report.md`, and `dashboard.html`. Findings are ranked by
+estimated dollars saved. Unknown cost sorts last. `summary` and `analyze`
+stay as terminal commands. The `demo` command and checked-in sample files are
+gone. Placeholder copy. Not a release.
+
 Prices now come from LiteLLM's published price file, with a bundled snapshot
 for offline runs. Not a release.
 

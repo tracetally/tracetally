@@ -9,6 +9,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from tests.report.test_html_offline import assert_no_external_loads
+from tests.support.factories import write_openai_usage_csv
 from tests.support.synthetic import CANARY, write_examples
 from tracetally.cli import EXIT_INPUT, EXIT_UNPRICED, EXIT_USAGE, app
 from tracetally.core.schema import RunResult
@@ -60,7 +61,8 @@ def test_report_writes_three_files_and_stays_offline(tmp_path: Path) -> None:
     assert CANARY not in markdown
     assert CANARY not in json.dumps(payload)
     assert payload["schema_version"] == 1
-    assert payload["synthetic"] is False
+    assert "synthetic" not in payload
+    assert "demo_seed" not in payload
     assert payload["include_content"] is False
     assert payload["content_excerpts"] == []
     assert payload["totals"]["est_monthly_savings_usd"]["mid"] == "0.02379"
@@ -180,7 +182,7 @@ def test_hostile_markup_is_text(tmp_path: Path) -> None:
 
 
 def test_cost_only_csv_skips_trace_checks(tmp_path: Path) -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "fixtures" / "openai" / "usage.csv"
+    csv_path = write_openai_usage_csv(tmp_path)
     out = tmp_path / "out"
     result = runner.invoke(app, ["report", str(csv_path), "--out", str(out)])
     assert result.exit_code == 0, result.output
@@ -193,47 +195,6 @@ def test_cost_only_csv_skips_trace_checks(tmp_path: Path) -> None:
     assert "agent_loops" in skipped
     assert any(item["check"] == "observability_gap" for item in payload["findings"])
     assert "not measured" in html.lower() or "Latency was not measured" in html
-
-
-def test_demo_labels_synthetic_data_and_exercises_checks(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["demo", "--out", str(tmp_path / "demo"), "--seed", "7"])
-    assert result.exit_code == 0, result.output
-    assert (
-        result.output.startswith("SYNTHETIC DATA")
-        or "SYNTHETIC DATA" in result.output.splitlines()[0:3]
-    )
-    demo = tmp_path / "demo"
-    assert (demo / "synthetic.jsonl").is_file()
-    assert (demo / "synthetic_otel.json").is_file()
-    assert (demo / "tiers.yaml").is_file()
-    assert (demo / "ground_truth.json").is_file()
-    html = (demo / "report.html").read_text(encoding="utf-8")
-    markdown = (demo / "report.md").read_text(encoding="utf-8")
-    payload = json.loads((demo / "findings.json").read_text(encoding="utf-8"))
-    assert_no_external_loads(html)
-    assert "SYNTHETIC DATA" in html
-    assert "SYNTHETIC DATA" in markdown
-    assert "Seed 7" in html
-    assert payload["synthetic"] is True
-    assert payload["demo_seed"] == 7
-    checks = {item["check"] for item in payload["findings"]}
-    assert {
-        "token_bloat",
-        "cache_opportunity",
-        "batch_candidates",
-        "retry_waste",
-        "agent_loops",
-    } <= checks
-    assert "model_swap" in checks
-    assert CANARY not in html
-    truth = json.loads((demo / "ground_truth.json").read_text(encoding="utf-8"))
-    assert truth["seed"] == 7
-    assert truth["planted"]["cache_opportunity"]["mid"] == "0.00675"
-
-
-def test_demo_rejects_a_negative_seed(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["demo", "--out", str(tmp_path), "--seed", "-1"])
-    assert result.exit_code == EXIT_USAGE
 
 
 def test_report_exit_codes(tmp_path: Path) -> None:

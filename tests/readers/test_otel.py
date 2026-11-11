@@ -7,16 +7,19 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.factories import (
+    write_otel_legacy,
+    write_otel_lines,
+    write_otel_openinference,
+)
 from tracetally.config import ReaderConfig
 from tracetally.core.schema import SpanKind
 from tracetally.readers.base import load_paths, select_reader
 from tracetally.readers.otel import LARGE_DOCUMENT_BYTES, OtelReader
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "otel"
 
-
-def test_legacy_and_openinference_attributes() -> None:
-    legacy = load_paths([FIXTURES / "legacy.json"], ReaderConfig())
+def test_legacy_and_openinference_attributes(tmp_path: Path) -> None:
+    legacy = load_paths([write_otel_legacy(tmp_path)], ReaderConfig())
     assert len(legacy) == 1
     assert legacy.provider[0] == "openai"
     assert legacy.model[0] == "gpt-4o-mini"
@@ -27,7 +30,7 @@ def test_legacy_and_openinference_attributes() -> None:
     assert "CANARY_OTEL_PROMPT" not in " ".join(legacy.warnings)
     assert "CANARY_OTEL_PROMPT" not in (legacy.content_hash[0] or "")
 
-    inferred = load_paths([FIXTURES / "openinference.json"], ReaderConfig())
+    inferred = load_paths([write_otel_openinference(tmp_path)], ReaderConfig())
     assert len(inferred) == 1
     assert inferred.endpoint[0] == "support.reply"
     assert int(inferred.cached_input_tokens[0]) == 100
@@ -36,8 +39,8 @@ def test_legacy_and_openinference_attributes() -> None:
     assert inferred.spans[0].kind is SpanKind.RETRIEVER
 
 
-def test_jsonl_export_skips_bad_lines_and_streams() -> None:
-    store = load_paths([FIXTURES / "lines.jsonl"], ReaderConfig())
+def test_jsonl_export_skips_bad_lines_and_streams(tmp_path: Path) -> None:
+    store = load_paths([write_otel_lines(tmp_path)], ReaderConfig())
     assert len(store) == 1
     assert store.inputs[0].skipped == 2
     warning = " ".join(store.warnings)
@@ -100,7 +103,8 @@ def test_response_model_wins_and_tool_span_is_not_a_call(tmp_path: Path) -> None
 def test_large_single_document_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("tracetally.readers.otel.LARGE_DOCUMENT_BYTES", 20)
     path = tmp_path / "big.json"
-    path.write_text(FIXTURES.joinpath("legacy.json").read_text(encoding="utf-8"), encoding="utf-8")
+    legacy = write_otel_legacy(tmp_path / "src")
+    path.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
     assert path.stat().st_size > 20
     store = load_paths([path], ReaderConfig())
     assert len(store) == 1

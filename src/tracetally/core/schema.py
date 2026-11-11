@@ -177,8 +177,6 @@ class RunResult(BaseModel):
     schema_version: int = 1
     tracetally_version: str
     generated_at: str = ""
-    synthetic: bool = False
-    demo_seed: int | None = None
     redacted: bool = False
     include_content: bool = False
     show_footer: bool = True
