@@ -85,6 +85,16 @@ def cache_accounting(
         return text
     if not has_cache:
         return ABSENT
+    return cache_convention(provider, model, source)
+
+
+def cache_convention(provider: str, model: str, source: str | None = None) -> str:
+    """How this source counts cache tokens, even when a call has no cache fields.
+
+    OTel includes cache reads and cache writes in ``input_tokens`` for every
+    provider. JSONL and Langfuse Anthropic counts exclude both. OpenAI and
+    Gemini counts include cache reads.
+    """
     if (source or "").strip().casefold() == "otel":
         return EMBEDDED
     billed = provider.strip().casefold()

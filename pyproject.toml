@@ -74,7 +74,6 @@ packages = ["src/tracetally"]
 include = [
   "src",
   "tests",
-  "examples",
   "scripts",
   "README.md",
   "LICENSE",
@@ -157,6 +156,8 @@ source = [
   "tracetally.readers",
   "tracetally.pricing",
   "tracetally.analysis",
+  "tracetally.report",
+  "tracetally.cli",
 ]
 branch = true
 

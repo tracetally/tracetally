@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from tests.support.factories import write_langfuse_observations, write_openai_usage_csv
 from tests.support.synthetic import (
     CANARY,
     CONTROL_ENDPOINT,
@@ -35,7 +36,6 @@ from tracetally.pricing.table import load_bundled
 from tracetally.readers.base import load_paths
 
 runner = CliRunner()
-_FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _TRACE_CHECKS = (
     "token_bloat",
     "cache_opportunity",
@@ -136,7 +136,6 @@ def test_checks_skip_when_capabilities_or_tier_map_are_missing() -> None:
         analyze(store, load_bundled(), AnalyzeConfig(skip=frozenset({"not-a-check"})))
 
 
-_EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _CANARIES = (
     "CANARY_PROMPT_DO_NOT_LEAK",
     "CANARY_OUTPUT_DO_NOT_LEAK",
@@ -155,11 +154,11 @@ _MISSING_CAPABILITY = {
 }
 
 
-def test_capability_skips_use_the_langfuse_and_openai_csv_readers() -> None:
+def test_capability_skips_use_the_langfuse_and_openai_csv_readers(tmp_path: Path) -> None:
     """Skips come from the real readers, not a hand-built capability set."""
     table = load_bundled()
-    usage = _FIXTURES / "openai" / "usage.csv"
-    observations = _FIXTURES / "langfuse" / "observations.json"
+    usage = write_openai_usage_csv(tmp_path)
+    observations = write_langfuse_observations(tmp_path)
 
     csv_store = load_paths([usage], ReaderConfig())
     assert csv_store.readers == {"openai_csv"}
@@ -192,22 +191,6 @@ def test_capability_skips_use_the_langfuse_and_openai_csv_readers() -> None:
     agent = next(item for item in mixed_result.skipped if item.check == "agent_loops")
     assert "an input is cost-only and does not include" in agent.reason
     assert "trace_tree" in agent.reason
-
-    example_csv = analyze(
-        load_paths([_EXAMPLES / "synthetic_openai_usage.csv"], ReaderConfig()),
-        table,
-        AnalyzeConfig(),
-    )
-    cache_reason = next(
-        item.reason for item in example_csv.skipped if item.check == "cache_opportunity"
-    )
-    assert "OpenAI usage CSV is cost-only" in cache_reason
-    example_lang = analyze(
-        load_paths([_EXAMPLES / "synthetic_langfuse.json"], ReaderConfig()),
-        table,
-        AnalyzeConfig(),
-    )
-    assert {item.check for item in example_lang.skipped} == {"model_swap"}
 
     cli = runner.invoke(app, ["analyze", str(usage), "--json", "--offline"])
     assert cli.exit_code == 0, cli.output

@@ -1,21 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Smoke ``tracetally run --offline`` from a clean wheel install.
+"""Smoke ``tracetally run --offline --no-open`` from a clean wheel install.
 
-The input is generated at runtime by ``tests.support.synthetic.jsonl_text``.
-Nothing is written into the repository. This script does not call ``summary``
-or ``demo`` and does not read ``examples/``.
+Inputs are generated at runtime by ``tests.support.synthetic``. Nothing is
+written into the repository. This script does not call ``summary`` or ``demo``
+and does not read ``examples/``.
 
-B1 adds ``tracetally run``. Until that command exists, this smoke fails.
-It still invokes ``run``. ``analyze`` is not a stand-in.
+Cases:
 
-B2 auto-detect is not covered. When that lands, add a third case beside the
-explicit file and the empty directory: point ``tracetally run --offline`` at a
-directory of mixed usage files and do not pass a format flag.
+* an explicit JSONL file, which must write ``dashboard.html``, ``report.md``,
+  and ``findings.json``
+* an empty directory, which must print ``No LLM usage file found`` and exit 0
+* a directory of mixed usage files, scanned with no format flag
 """
 
 from __future__ import annotations
 
 # Launches the installed console script. This harness does not make an HTTP call.
+import json
 import subprocess  # noqa: TID251
 import sys
 import tempfile
@@ -24,26 +25,37 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 EMPTY_FOLDER_MESSAGE = "No LLM usage file found"
+REPORT_FILES = ("dashboard.html", "report.md", "findings.json")
 
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 
 
 def run_smoke(tracetally: Path, *, runner: Runner | None = None) -> None:
-    """Run the two offline cases. ``runner`` is the process launcher, for tests."""
+    """Run the offline cases. ``runner`` is the process launcher, for tests."""
     execute = runner or _default_runner
     with tempfile.TemporaryDirectory(prefix="tracetally-wheel-") as raw:
         work = Path(raw)
-        generated = work / "calls.jsonl"
         text = _factory_jsonl()
         if not text.strip():
             raise SystemExit("error: test factory produced an empty trace")
+        generated = work / "calls.jsonl"
         generated.write_text(text, encoding="utf-8", newline="\n")
-        _invoke(execute, tracetally, generated)
+        report = work / "report"
+        _invoke(execute, tracetally, generated, out=report)
+        _require_artifacts(report)
+
         empty = work / "empty"
         empty.mkdir()
-        # B2: auto-detect case goes here. Do not add it until that command lands.
-        completed = _invoke(execute, tracetally, empty)
+        completed = _invoke(execute, tracetally, empty, out=work / "empty-report")
         _require_empty_message(completed)
+
+        mixed = work / "mixed"
+        mixed.mkdir()
+        (mixed / "calls.jsonl").write_text(text, encoding="utf-8", newline="\n")
+        (mixed / "traces.json").write_text(_factory_otel(), encoding="utf-8", newline="\n")
+        mixed_report = work / "mixed-report"
+        _invoke(execute, tracetally, mixed, out=mixed_report)
+        _require_artifacts(mixed_report)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,13 +67,21 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _factory_jsonl() -> str:
+def _load_factory() -> tuple[str, str]:
     root = str(ROOT)
     if root not in sys.path:
         sys.path.insert(0, root)
-    from tests.support.synthetic import jsonl_text
+    from tests.support.synthetic import jsonl_text, otel_document
 
-    return jsonl_text()
+    return jsonl_text(), json.dumps(otel_document()) + "\n"
+
+
+def _factory_jsonl() -> str:
+    return _load_factory()[0]
+
+
+def _factory_otel() -> str:
+    return _load_factory()[1]
 
 
 def _default_runner(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -72,14 +92,34 @@ def _invoke(
     execute: Runner,
     tracetally: Path,
     path: Path,
+    *,
+    out: Path,
 ) -> subprocess.CompletedProcess[str]:
-    argv = [str(tracetally), "run", "--offline", str(path)]
+    argv = [
+        str(tracetally),
+        "run",
+        "--offline",
+        "--no-open",
+        "--out",
+        str(out),
+        str(path),
+    ]
     completed = execute(argv)
     _show(completed)
     if completed.returncode != 0:
         detail = f"{completed.stdout or ''}{completed.stderr or ''}"
         raise SystemExit(f"error: {' '.join(argv)} exited {completed.returncode}\n{detail}")
     return completed
+
+
+def _require_artifacts(out: Path) -> None:
+    missing = [
+        name
+        for name in REPORT_FILES
+        if not (out / name).is_file() or (out / name).stat().st_size == 0
+    ]
+    if missing:
+        raise SystemExit(f"error: report {out} is missing {', '.join(missing)}")
 
 
 def _require_empty_message(completed: subprocess.CompletedProcess[str]) -> None:

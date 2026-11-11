@@ -8,13 +8,6 @@
 </head>
 <body>
 <main>
-{% if synthetic %}
-<section class="banner">
-  <strong>SYNTHETIC DATA</strong>
-  <p>Acme Support Bot is a planted sample, not a customer export.{% if demo_seed is not none %} Seed {{ demo_seed }}. The seed labels this run. The rows are fixed, not a random redraw.{% endif %}</p>
-</section>
-{% endif %}
-
 <header>
   <p class="meta">tracetally {{ version }} · no telemetry</p>
   <h1>LLM cost and reliability audit</h1>

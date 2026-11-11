@@ -7,19 +7,19 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.factories import write_array_json, write_messy_jsonl, write_pretty_json
 from tracetally.config import ReaderConfig
 from tracetally.core.errors import ReaderError
 from tracetally.core.schema import LLMCall
 from tracetally.readers.base import load_paths
 from tracetally.readers.jsonl import JsonlReader
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "jsonl"
 CANARY = "CANARY_PROMPT_DO_NOT_LEAK"
 BROKEN = "CANARY_BROKEN_LINE"
 
 
-def test_messy_file_skips_bad_lines_and_drops_prompt_text() -> None:
-    store = load_paths([FIXTURES / "messy.jsonl"], ReaderConfig())
+def test_messy_file_skips_bad_lines_and_drops_prompt_text(tmp_path: Path) -> None:
+    store = load_paths([write_messy_jsonl(tmp_path)], ReaderConfig())
     assert len(store) == 1
     assert store.inputs[0].skipped == 5
     assert store.model[0] == "gpt-4o-mini"
@@ -35,17 +35,17 @@ def test_messy_file_skips_bad_lines_and_drops_prompt_text() -> None:
     assert CANARY not in call_text
 
 
-def test_strict_mode_raises_on_the_first_bad_line() -> None:
+def test_strict_mode_raises_on_the_first_bad_line(tmp_path: Path) -> None:
     with pytest.raises(ReaderError, match="malformed JSON"):
-        load_paths([FIXTURES / "messy.jsonl"], ReaderConfig(strict=True))
+        load_paths([write_messy_jsonl(tmp_path)], ReaderConfig(strict=True))
 
 
 def test_pretty_document_and_array(tmp_path: Path) -> None:
-    pretty = load_paths([FIXTURES / "pretty.json"], ReaderConfig())
+    pretty = load_paths([write_pretty_json(tmp_path)], ReaderConfig())
     assert len(pretty) == 1
     assert pretty.endpoint[0] == "support.reply"
     assert pretty.duration_at(0) == pytest.approx(150)
-    array = load_paths([FIXTURES / "array.json"], ReaderConfig())
+    array = load_paths([write_array_json(tmp_path)], ReaderConfig())
     assert len(array) == 1
     assert array.inputs[0].skipped == 1
     assert "input_tokens" in " ".join(array.warnings)

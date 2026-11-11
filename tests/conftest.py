@@ -15,11 +15,6 @@ def root() -> Path:
     return ROOT
 
 
-@pytest.fixture
-def examples() -> Path:
-    return ROOT / "examples"
-
-
 @pytest.fixture(autouse=True)
 def _isolated_price_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Keep price-cache lookups off the developer machine and out of other tests."""
@@ -34,6 +29,17 @@ def allow_price_fetch() -> None:
     the test by raising. Request this fixture to allow that fallback.
     """
     return None
+
+
+@pytest.fixture(autouse=True)
+def _no_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests must not open a local browser."""
+    import webbrowser
+
+    def blocked(*_args: object, **_kwargs: object) -> bool:
+        raise AssertionError("webbrowser.open must not run in tests")
+
+    monkeypatch.setattr(webbrowser, "open", blocked)
 
 
 @pytest.fixture(autouse=True)

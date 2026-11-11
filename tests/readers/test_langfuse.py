@@ -9,23 +9,27 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.factories import (
+    write_langfuse_csv,
+    write_langfuse_observations,
+    write_langfuse_traces,
+)
 from tracetally.config import ReaderConfig
 from tracetally.core.errors import ReaderError
 from tracetally.core.schema import Capability, SpanKind, Status
 from tracetally.readers.base import load_paths, select_reader
 from tracetally.readers.langfuse import LangfuseReader
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "langfuse"
 CANARY = "CANARY_PROMPT_DO_NOT_LEAK"
 
 
-def test_sniff_prefers_langfuse_over_jsonl_and_ignores_otel() -> None:
-    observations = FIXTURES / "observations.json"
+def test_sniff_prefers_langfuse_over_jsonl_and_ignores_otel(tmp_path: Path) -> None:
+    observations = write_langfuse_observations(tmp_path)
     assert select_reader(observations, None) is LangfuseReader
     assert LangfuseReader.sniff(observations, observations.read_bytes()[:100]) > 0.9
     otel = b'{"resourceSpans": []}'
     assert LangfuseReader.sniff(Path("x.json"), otel) == 0.0
-    csv_path = FIXTURES / "observations.csv"
+    csv_path = write_langfuse_csv(tmp_path)
     assert select_reader(csv_path, None) is LangfuseReader
     canonical = (
         b'{"trace_id":"t","model":"gpt-4o-mini","start_time":"2026-10-01T00:00:00Z",'
@@ -36,8 +40,8 @@ def test_sniff_prefers_langfuse_over_jsonl_and_ignores_otel() -> None:
     assert LangfuseReader.sniff(Path("obs.json"), blob) == 0.96
 
 
-def test_json_observations_map_generations_spans_and_costs() -> None:
-    store = load_paths([FIXTURES / "observations.json"], ReaderConfig())
+def test_json_observations_map_generations_spans_and_costs(tmp_path: Path) -> None:
+    store = load_paths([write_langfuse_observations(tmp_path)], ReaderConfig())
     assert store.readers == {"langfuse"}
     assert Capability.TRACE_TREE in (store.capabilities or set())
     assert len(store) == 1
@@ -69,16 +73,16 @@ def test_json_observations_map_generations_spans_and_costs() -> None:
 
 def test_endpoint_attr_and_strict_missing_model(tmp_path: Path) -> None:
     chosen = load_paths(
-        [FIXTURES / "observations.json"],
+        [write_langfuse_observations(tmp_path)],
         ReaderConfig(endpoint_attr="feature"),
     )
     assert chosen.endpoint[0] == "reply"
     with pytest.raises(ReaderError, match="model"):
-        load_paths([FIXTURES / "observations.json"], ReaderConfig(strict=True))
+        load_paths([write_langfuse_observations(tmp_path)], ReaderConfig(strict=True))
 
 
-def test_trace_export_expands_observations_and_skips_a_model_less_trace() -> None:
-    store = load_paths([FIXTURES / "traces.json"], ReaderConfig())
+def test_trace_export_expands_observations_and_skips_a_model_less_trace(tmp_path: Path) -> None:
+    store = load_paths([write_langfuse_traces(tmp_path)], ReaderConfig())
     assert len(store) == 2
     assert store.inputs[0].skipped == 1
     by_model = dict(zip(store.model, range(len(store)), strict=True))
@@ -98,8 +102,8 @@ def test_trace_export_expands_observations_and_skips_a_model_less_trace() -> Non
     assert "trace has no model" in " ".join(store.warnings)
 
 
-def test_csv_aliases_dates_and_extra_columns() -> None:
-    store = load_paths([FIXTURES / "observations.csv"], ReaderConfig())
+def test_csv_aliases_dates_and_extra_columns(tmp_path: Path) -> None:
+    store = load_paths([write_langfuse_csv(tmp_path)], ReaderConfig())
     assert len(store) == 1
     assert store.spans and len(store.spans) == 2
     assert store.model[0] == "gpt-4o-mini"

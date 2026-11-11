@@ -168,8 +168,10 @@ class RunResult(BaseModel):
     ``schema_version`` is a public contract. Summary JSON from ``tracetally
     summary --json`` stays a separate document (``summary_schema_version``).
     ``skipped_checks`` is the analyze run (capabilities, ``--only``, ``--skip``,
-    and a missing tier map). ``summary`` embeds that command's own document,
-    including its capability-only skip list.
+    and a missing tier map).     ``summary`` embeds that command's own document,
+    including its capability-only skip list. ``records_dropped`` counts
+    records removed because a request, span, or trace id was already seen
+    in an earlier file.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -177,8 +179,6 @@ class RunResult(BaseModel):
     schema_version: int = 1
     tracetally_version: str
     generated_at: str = ""
-    synthetic: bool = False
-    demo_seed: int | None = None
     redacted: bool = False
     include_content: bool = False
     show_footer: bool = True
@@ -199,4 +199,5 @@ class RunResult(BaseModel):
     skipped_checks: list[SkippedCheck] = Field(default_factory=list)
     inputs: list[InputDigest] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    records_dropped: int = 0
     content_excerpts: list[dict[str, str]] = Field(default_factory=list)

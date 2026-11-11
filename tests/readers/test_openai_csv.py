@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.factories import write_openai_costs_csv, write_openai_usage_csv
 from tracetally.analysis.summary import summarize
 from tracetally.config import ReaderConfig
 from tracetally.core.errors import ReaderError
@@ -16,18 +17,16 @@ from tracetally.pricing.table import load_bundled
 from tracetally.readers.base import load_paths, select_reader
 from tracetally.readers.openai_csv import OpenAICsvReader
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "openai"
 
-
-def test_sniff_detects_usage_csv_and_not_langfuse() -> None:
-    usage = FIXTURES / "usage.csv"
+def test_sniff_detects_usage_csv_and_not_langfuse(tmp_path: Path) -> None:
+    usage = write_openai_usage_csv(tmp_path)
     assert select_reader(usage, None) is OpenAICsvReader
     assert OpenAICsvReader.sniff(usage, b"traceId,model,input_tokens\n") == 0.0
     assert OpenAICsvReader.capabilities == frozenset()
 
 
-def test_usage_rows_are_aggregated_and_a_bad_date_is_skipped() -> None:
-    store = load_paths([FIXTURES / "usage.csv"], ReaderConfig())
+def test_usage_rows_are_aggregated_and_a_bad_date_is_skipped(tmp_path: Path) -> None:
+    store = load_paths([write_openai_usage_csv(tmp_path)], ReaderConfig())
     assert store.readers == {"openai_csv"}
     assert store.capabilities == frozenset()
     assert Capability.LATENCY not in (store.capabilities or set())
@@ -52,8 +51,10 @@ def test_usage_rows_are_aggregated_and_a_bad_date_is_skipped() -> None:
     assert "ISO-8601" in warnings or "timestamp" in warnings
 
 
-def test_cost_csv_uses_aliases_and_keeps_reported_cost() -> None:
-    store = load_paths([FIXTURES / "costs.csv"], ReaderConfig(endpoint_attr="project_name"))
+def test_cost_csv_uses_aliases_and_keeps_reported_cost(tmp_path: Path) -> None:
+    store = load_paths(
+        [write_openai_costs_csv(tmp_path)], ReaderConfig(endpoint_attr="project_name")
+    )
     assert len(store) == 1
     assert store.inputs[0].skipped == 1
     assert store.model[0] == "gpt-4o-mini-2024-07-18"

@@ -11,7 +11,7 @@ from tracetally.pricing.fetch import LITELLM_PRICES_URL
 from tracetally.pricing.table import load_bundled
 
 
-def test_bundled_snapshot_prices_the_demo_models() -> None:
+def test_bundled_snapshot_prices_the_listed_models() -> None:
     table = load_bundled()
     assert table.provenance.source == "bundled"
     assert table.provenance.url == LITELLM_PRICES_URL

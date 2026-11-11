@@ -95,14 +95,13 @@
     <h1>tracetally</h1>
     <p class="tagline">Your LLM bill tells you the total. tracetally tells you why.</p>
     <p>
-      Point it at traces you already exported. JSONL, OTLP/JSON, Langfuse, and
-      OpenAI usage CSV are enough. It prices the calls from a bundled table,
-      ranks where the spend went, and writes a report on disk.
+      Point it at traces you already exported. JSONL, OpenTelemetry, Langfuse, and
+      OpenAI usage CSV are enough. It prices those calls from a LiteLLM price-list
+      download. <code>--offline</code> skips that download and uses the bundled snapshot.
+      It ranks where the spend went and writes a report on disk.
     </p>
     <p>
-      It is not a proxy, gateway, or SDK. It does not sit on the request path,
-      hold provider API keys, or send telemetry. The only network request is
-      the LiteLLM price file. Offline mode uses the bundled snapshot.
+      Runs locally. Your data never leaves your machine. The only network request tracetally makes is a price-list download, which <code>--offline</code> turns off. No telemetry, no proxy, no LLM calls.
     </p>
 
     <h2>Install</h2>
@@ -110,9 +109,12 @@
     <p class="muted">Python 3.10 or newer. Apache-2.0.</p>
 
     <h2>Use</h2>
-    <pre><code>tracetally summary traces.jsonl
-tracetally analyze traces.jsonl
-tracetally report traces.jsonl --out ./audit</code></pre>
+    <pre><code>tracetally run
+tracetally run ./exports --no-open</code></pre>
+    <p>
+      With no path, tracetally scans the current folder. The dashboard is written
+      to the report folder and opens in your browser. <code>--no-open</code> leaves it closed.
+    </p>
 
     <h2>Source and contact</h2>
     <ul>
@@ -120,8 +122,7 @@ tracetally report traces.jsonl --out ./audit</code></pre>
       <li><a href="mailto:team.tracetally@gmail.com">team.tracetally@gmail.com</a></li>
     </ul>
     <p>
-      <a href="mailto:team.tracetally@gmail.com">Book an audit</a>.
-      Founding LLM cost audits for teams spending roughly $1k–50k/mo on LLM APIs.
+      <a href="https://tracetally.github.io/tracetally/audit/">Book a detailed audit</a>.
     </p>
   </main>
 </body>

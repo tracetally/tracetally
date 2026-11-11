@@ -51,7 +51,9 @@ workflow, never a push to `main` and never a second HTTP client.
 stylesheet link. Inline SVG is drawn in `src/tracetally/report/svg.py`. The
 only remote URLs are the two plain anchors in `tracetally.report.links`.
 `tests/report/test_html_offline.py` fails the build if a report would load
-anything else.
+anything else. `dashboard.html` is separate: one inline script, hashed into
+a CSP of `default-src 'none'`, and no `unsafe-inline`. The audit link text
+and URL live in `tracetally/_cta.py`.
 
 `--include-content` is the only path that may copy prompt text into the
 report, and it is capped. The default readers hash that text and drop it.

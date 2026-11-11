@@ -15,22 +15,17 @@ from rich.table import Table
 
 from tracetally import __version__
 from tracetally.analysis.skip import run_mode, skipped_for
+from tracetally.core.cache import EMBEDDED, INCLUDED, SEPARATE, cache_convention
 from tracetally.core.money import format_usd
 from tracetally.core.schema import Capability, SkippedCheck
 from tracetally.core.stats import percentiles_or_none, rate
 from tracetally.core.store import TraceStore
+from tracetally.core.terminal import terminal_safe
 from tracetally.pricing.table import PriceTable, request_size
 
 SUMMARY_SCHEMA_VERSION = 1
 
-METHODOLOGY = (
-    "Costs are list prices per 1M tokens from the LiteLLM price file. "
-    "OpenAI and Gemini input counts include cache reads. Those reads are priced "
-    "at the cache rate and subtracted from input once. "
-    "Anthropic input counts exclude cache reads and cache writes. Those are "
-    "priced separately, and a cache write uses the published creation rate. "
-    "With no cache fields, input is priced at the input rate and no cache "
-    "tokens are invented. "
+_METHODOLOGY_TAIL = (
     "The over-200k-token rate applies per request when that request's input tokens "
     "exceed 200000 and the file publishes an above-200k rate. "
     "Batch, priority, and flex rates apply only when the export shows that tier. "
@@ -41,6 +36,77 @@ METHODOLOGY = (
     "A fine-tune priced from its base model is labelled estimate. "
     "Reasoning tokens are reported separately and are not added on top of output tokens."
 )
+
+_OTEL_CACHE = (
+    "OTel input counts include cache reads and cache writes. "
+    "Those are priced at their own rates and subtracted from input once."
+)
+_INCLUDED_CACHE = (
+    "OpenAI and Gemini input counts include cache reads. Those reads are priced "
+    "at the cache rate and subtracted from input once."
+)
+_ANTHROPIC_CACHE = (
+    "Anthropic input counts in JSONL and Langfuse exclude cache reads and cache writes. "
+    "Those are priced separately, and a cache write uses the published creation rate."
+)
+_ABSENT_CACHE = (
+    "With no cache fields, input is priced at the input rate and no cache tokens are invented."
+)
+
+
+def methodology_for(store: TraceStore) -> str:
+    """Price methodology for the sources actually in ``store``.
+
+    OTel counts include cache tokens for every provider, including Anthropic.
+    JSONL and Langfuse Anthropic counts exclude them. An empty store states
+    each convention so a caller with no rows still has the rules.
+    """
+    saw_otel = False
+    saw_included = False
+    saw_anthropic = False
+    for index in range(len(store)):
+        source = store.source[index]
+        provider = store.provider[index]
+        model = store.model[index]
+        convention = cache_convention(provider, model, source)
+        if store.cache_accounting[index] == EMBEDDED or convention == EMBEDDED:
+            saw_otel = True
+        elif store.cache_accounting[index] == INCLUDED or convention == INCLUDED:
+            saw_included = True
+        elif convention == SEPARATE and _anthropic_name(provider, model):
+            saw_anthropic = True
+    if len(store) == 0:
+        saw_otel = saw_included = saw_anthropic = True
+    sentences = ["Costs are list prices per 1M tokens from the LiteLLM price file."]
+    if saw_otel:
+        sentences.append(_OTEL_CACHE)
+    if saw_included:
+        sentences.append(_INCLUDED_CACHE)
+    if saw_anthropic:
+        sentences.append(_ANTHROPIC_CACHE)
+    sentences.append(_ABSENT_CACHE)
+    return " ".join(sentences) + " " + _METHODOLOGY_TAIL
+
+
+def _anthropic_name(provider: str, model: str) -> bool:
+    billed = provider.strip().casefold()
+    name = model.strip().casefold()
+    if billed in {"anthropic", "claude"} or name.startswith("claude"):
+        return True
+    hosted = billed in {
+        "bedrock",
+        "aws",
+        "amazon",
+        "aws.bedrock",
+        "vertex",
+        "vertex_ai",
+        "vertexai",
+        "vertex-ai",
+    }
+    return hosted and ("anthropic" in name or "claude" in name)
+
+
+METHODOLOGY = methodology_for(TraceStore())
 
 
 @dataclass
@@ -103,6 +169,7 @@ class Summary:
     by_model: list[GroupSummary]
     by_endpoint_model: list[GroupSummary]
     warnings: list[str]
+    methodology: str
     inputs: list[dict[str, object]]
     time_start: datetime | None
     time_end: datetime | None
@@ -142,7 +209,7 @@ class Summary:
             "currency": self.currency,
             "fx_rate": self.fx_rate,
             "fx_user_supplied": self.fx_user_supplied,
-            "methodology": METHODOLOGY,
+            "methodology": self.methodology,
             "inputs": self.inputs,
             "time_span": {
                 "start": _iso(self.time_start),
@@ -217,7 +284,7 @@ class Summary:
         cost_line = (
             f"tokens in {self.input_tokens}  cached {self.cached_input_tokens}  "
             f"out {self.output_tokens}  reasoning {self.reasoning_tokens}  "
-            f"cost {format_usd(self.cost_usd)} {self.currency}"
+            f"cost {format_usd(self.cost_usd)} {terminal_safe(self.currency)}"
         )
         if self.show_discount:
             listed = format_usd(self.list_cost_usd)
@@ -226,7 +293,8 @@ class Summary:
         console.print(cost_line)
         if self.fx_user_supplied:
             console.print(
-                f"currency {self.currency}  FX rate {self.fx_rate} was supplied by the user "
+                f"currency {terminal_safe(self.currency)}  FX rate {self.fx_rate} was supplied "
+                "by the user "
                 "and was not fetched"
             )
         if self.billed_cost_usd is not None or self.inferred_cost_usd is not None:
@@ -262,19 +330,36 @@ class Summary:
             console.print()
             console.print("Skipped checks")
             for item in self.skipped_checks:
-                console.print(f"- {item.check}: {item.reason}")
+                console.print(f"- {terminal_safe(item.check)}: {terminal_safe(item.reason)}")
         if self.warnings:
             console.print()
             console.print("Warnings")
             for warning in self.warnings:
-                console.print(f"- {warning}")
+                console.print(f"- {terminal_safe(warning)}")
         console.print()
-        console.print(METHODOLOGY)
+        console.print(self.methodology)
         console.print(
             f"No telemetry. Prices {self.price_source} ({self.price_table_retrieved_on}). "
             "tracetally is not a proxy, gateway, or middleware."
         )
         return buffer.getvalue()
+
+
+def _otel_cache_overflow(store: TraceStore) -> int:
+    """OTel calls whose cache read + write is larger than ``input_tokens``.
+
+    Embedded accounting still clamps so the uncached remainder cannot go
+    negative. The count is the report's warning instead of a silent clamp.
+    """
+    count = 0
+    for index in range(len(store)):
+        if store.cache_accounting[index] != EMBEDDED:
+            continue
+        cached = int(store.cached_input_tokens[index])
+        created = int(store.cache_creation_tokens[index])
+        if cached + created > int(store.input_tokens[index]):
+            count += 1
+    return count
 
 
 def summarize(store: TraceStore, table: PriceTable) -> Summary:
@@ -453,6 +538,13 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
             "standard rates used"
         )
     warnings.extend(sorted(caveats))
+    overflow = _otel_cache_overflow(store)
+    if overflow:
+        noun = "call" if overflow == 1 else "calls"
+        warnings.append(
+            f"OTel cache read + cache write exceeded input_tokens on {overflow} {noun}; "
+            "those calls were clamped so the extra cache tokens are not priced twice"
+        )
 
     return Summary(
         price_table_id=table.display_id,
@@ -471,6 +563,7 @@ def summarize(store: TraceStore, table: PriceTable) -> Summary:
             key=lambda group: (group.endpoint or "", group.provider, group.model),
         ),
         warnings=warnings,
+        methodology=methodology_for(store),
         inputs=[
             {
                 "path": item.path,
@@ -685,7 +778,7 @@ def _model_table(groups: list[GroupSummary], *, latency_measured: bool, currency
         "Input",
         "Cached",
         "Output",
-        f"Cost {currency}",
+        f"Cost {terminal_safe(currency)}",
         "n",
         "p50",
         "p95",
@@ -697,8 +790,8 @@ def _model_table(groups: list[GroupSummary], *, latency_measured: bool, currency
     for group in groups:
         latency = group.latency()
         table.add_row(
-            group.provider,
-            group.model,
+            terminal_safe(group.provider),
+            terminal_safe(group.model),
             str(group.requests),
             str(group.input_tokens),
             str(group.cached_input_tokens),
@@ -723,7 +816,7 @@ def _endpoint_table(groups: list[GroupSummary], *, latency_measured: bool, curre
         "Requests",
         "Input",
         "Output",
-        f"Cost {currency}",
+        f"Cost {terminal_safe(currency)}",
         "n",
         "p50",
         "p95",
@@ -739,9 +832,9 @@ def _endpoint_table(groups: list[GroupSummary], *, latency_measured: bool, curre
     for group in groups:
         latency = group.latency()
         table.add_row(
-            group.endpoint or "(unknown)",
-            group.provider,
-            group.model,
+            terminal_safe(group.endpoint or "(unknown)"),
+            terminal_safe(group.provider),
+            terminal_safe(group.model),
             str(group.requests),
             str(group.input_tokens),
             str(group.output_tokens),
