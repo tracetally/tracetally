@@ -243,7 +243,9 @@ def test_deeply_nested_fetch_body_falls_back(
     assert table.resolve("openai", "gpt-4o-mini") is not None
 
 
-def test_deeply_nested_cache_is_removed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_deeply_nested_cache_is_removed(
+    allow_price_fetch: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     cache = tmp_path / "cache"
     _write_cache(cache, _nested(100_000), datetime.now(timezone.utc))
     cached = cache / _CACHE_NAME

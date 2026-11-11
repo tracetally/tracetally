@@ -81,14 +81,14 @@ def test_summary_on_jsonl_and_otel(tmp_path: Path) -> None:
     write_examples(tmp_path)
     jsonl = tmp_path / "synthetic.jsonl"
     otel = tmp_path / "synthetic_otel.json"
-    text = runner.invoke(app, ["summary", str(otel)])
+    text = runner.invoke(app, ["summary", str(otel), "--offline"])
     assert text.exit_code == 0, text.output
     assert "gpt-4o-mini" in text.output
     assert "support.reply" in text.output
     assert "0.292410" in text.output
     assert "No telemetry." in text.output
 
-    machine = runner.invoke(app, ["summary", str(jsonl), "--json"])
+    machine = runner.invoke(app, ["summary", str(jsonl), "--json", "--offline"])
     assert machine.exit_code == 0, machine.output
     payload = json.loads(machine.stdout or machine.output)
     assert payload["totals"]["cost_usd"] == "0.29241"
@@ -96,7 +96,7 @@ def test_summary_on_jsonl_and_otel(tmp_path: Path) -> None:
     assert payload["error_rates"]["n_429"] == 11
     assert payload["error_rates"]["rate_429"] == f"{11 / 235:.6f}"
 
-    both = runner.invoke(app, ["summary", str(jsonl), str(otel), "--json"])
+    both = runner.invoke(app, ["summary", str(jsonl), str(otel), "--json", "--offline"])
     assert both.exit_code == 0
     merged = json.loads(both.stdout or both.output)
     assert merged["totals"]["calls"] == 470
@@ -105,11 +105,13 @@ def test_summary_on_jsonl_and_otel(tmp_path: Path) -> None:
 def test_strict_missing_file_and_unpriced(tmp_path: Path) -> None:
     messy = tmp_path / "bad.jsonl"
     messy.write_text("not-json\n", encoding="utf-8")
-    strict = runner.invoke(app, ["summary", str(messy), "--format", "jsonl", "--strict"])
+    strict = runner.invoke(
+        app, ["summary", str(messy), "--format", "jsonl", "--strict", "--offline"]
+    )
     assert strict.exit_code == EXIT_INPUT
     assert "malformed JSON" in (strict.stderr or strict.output)
 
-    missing = runner.invoke(app, ["summary", str(tmp_path / "missing.jsonl")])
+    missing = runner.invoke(app, ["summary", str(tmp_path / "missing.jsonl"), "--offline"])
     assert missing.exit_code == EXIT_INPUT
 
     unknown = tmp_path / "unknown.jsonl"
@@ -118,7 +120,7 @@ def test_strict_missing_file_and_unpriced(tmp_path: Path) -> None:
         '"input_tokens":1,"output_tokens":1}\n',
         encoding="utf-8",
     )
-    unpriced = runner.invoke(app, ["summary", str(unknown), "--json"])
+    unpriced = runner.invoke(app, ["summary", str(unknown), "--json", "--offline"])
     assert unpriced.exit_code == EXIT_UNPRICED
     body = json.loads(unpriced.stdout or unpriced.output)
     assert body["totals"]["cost_usd"] is None
@@ -164,14 +166,14 @@ output = "3"
     assert payload["totals"]["cost_usd"] == "2"
     assert payload["by_endpoint_model"][0]["endpoint"] == "custom"
 
-    listed = runner.invoke(app, ["prices", "list", "--json"])
+    listed = runner.invoke(app, ["prices", "list", "--json", "--offline"])
     assert listed.exit_code == 0
     models = json.loads(listed.stdout or listed.output)["models"]
     assert any(
         row["model"] == "gpt-4o-mini" and row["source_url"].startswith("https://") for row in models
     )
 
-    checked = runner.invoke(app, ["prices", "check"])
+    checked = runner.invoke(app, ["prices", "check", "--offline"])
     assert checked.exit_code == 0
     assert "source=bundled" in checked.output
 
@@ -182,11 +184,6 @@ output = "3"
     assert "langfuse:" in readers.output
     assert "openai_csv:" in readers.output
 
-    listed_default = runner.invoke(app, ["prices"])
-    assert listed_default.exit_code == 0
-    assert "gpt-4o-mini" in listed_default.output
-    assert "reasoning" in listed_default.output
-
     version = runner.invoke(app, ["version"])
     assert version.exit_code == 0
     assert version.output.strip() == "0.1.0.dev0"
@@ -194,6 +191,15 @@ output = "3"
     help_text = runner.invoke(app, ["--help"])
     assert help_text.exit_code == 0
     assert "network" in help_text.output.lower()
+
+
+def test_prices_without_a_subcommand_uses_the_blocked_fetch_fallback(
+    allow_price_fetch: None,
+) -> None:
+    listed_default = runner.invoke(app, ["prices"])
+    assert listed_default.exit_code == 0
+    assert "gpt-4o-mini" in listed_default.output
+    assert "reasoning" in listed_default.output
 
 
 def test_summary_help_lists_the_milestone_flags() -> None:

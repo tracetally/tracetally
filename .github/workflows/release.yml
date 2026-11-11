@@ -39,7 +39,7 @@ jobs:
           python -m venv /tmp/tt
           /tmp/tt/bin/pip install dist/*.whl
           /tmp/tt/bin/tracetally version
-          /tmp/tt/bin/tracetally summary examples/synthetic.jsonl --json
+          /tmp/tt/bin/python scripts/clean_wheel_smoke.py /tmp/tt/bin/tracetally
       - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:

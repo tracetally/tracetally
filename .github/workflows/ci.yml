@@ -47,7 +47,7 @@ jobs:
           ruff format --check src tests scripts
       - name: Mypy
         run: mypy src
-      - name: No HTTP clients in the runtime dependency tree
+      - name: Network allowlist
         run: python scripts/check_no_http_clients.py
 
   # Matrix from the event. Default is ubuntu 3.10 and 3.13. Full is
@@ -124,17 +124,19 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Build the wheel
+      - name: Build the sdist and wheel
         run: |
           python -m pip install build
           python -m build
-      - name: Smoke-test the wheel offline
+      - name: Package contains only the LiteLLM snapshot as data
+        run: python scripts/check_package_contents.py dist/*
+      - name: Install the wheel in a fresh venv
         run: |
           python -m venv /tmp/tt
           /tmp/tt/bin/pip install dist/*.whl
-          /tmp/tt/bin/python -c 'open("/tmp/tt-in.jsonl","w",encoding="utf-8").write("{\"model\":\"gpt-4o-mini\",\"provider\":\"openai\",\"start_time\":\"2026-01-01T00:00:00Z\",\"input_tokens\":10,\"output_tokens\":2}\n")'
-          /tmp/tt/bin/tracetally run /tmp/tt-in.jsonl --offline --out /tmp/tt-report
-          test -s /tmp/tt-report/dashboard.html
-          test -s /tmp/tt-report/report.md
-          test -s /tmp/tt-report/findings.json
           /tmp/tt/bin/python scripts/check_no_http_clients.py
+      # Clean wheel. Inputs are generated at runtime. The explicit file must
+      # write dashboard.html, report.md, and findings.json. An empty directory
+      # and a mixed directory (no format flag) follow, all with --offline --no-open.
+      - name: Clean-wheel smoke
+        run: /tmp/tt/bin/python scripts/clean_wheel_smoke.py /tmp/tt/bin/tracetally

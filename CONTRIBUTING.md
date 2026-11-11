@@ -17,11 +17,22 @@ ruff format --check src tests scripts
 mypy src
 python -m pytest --disable-socket
 python scripts/check_no_http_clients.py
+python -m build
+python scripts/check_package_contents.py dist/*
 ```
 
-The test suite blocks sockets. `src/` is also linted so it cannot import
-`socket`, `urllib.request`, `http.client`, `requests`, `httpx`, `aiohttp`,
-or `subprocess`.
+The test suite blocks sockets. `src/tracetally/pricing/fetch.py` is the only
+module that may make an HTTP call (one GET of the pinned LiteLLM price file).
+Ruff and `scripts/check_no_http_clients.py` fail the build on any other
+network import or HTTP call. The wheel and the sdist may contain one data
+file, the bundled LiteLLM snapshot. A weekly workflow refreshes that snapshot
+and opens a pull request. It does not push to `main`.
+
+CI installs that wheel in a fresh venv and runs `scripts/clean_wheel_smoke.py`.
+That runs `tracetally run --offline` on JSONL generated at runtime by
+`tests.support.synthetic`, then on an empty directory. The empty directory
+must print `No LLM usage file found` and exit 0. Until B1 adds `run`, that
+step fails. Auto-detect waits for B2.
 
 ## Prices
 
@@ -31,7 +42,8 @@ LiteLLM's price file. The only network call is the GET in
 `src/tracetally/pricing/fetch.py`. `--offline` uses that snapshot and opens
 no socket. Do not guess a price for a model the snapshot does not list.
 Unknown models stay unpriced at runtime. User overrides belong in
-`tracetally.toml`.
+`tracetally.toml`. Updating the snapshot is a pull request from the weekly
+workflow, never a push to `main` and never a second HTTP client.
 
 ## Reports
 
