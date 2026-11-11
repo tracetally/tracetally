@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'none'; img-src 'none'; font-src 'none'; script-src 'sha256-FUxHGLB1vfv58eV/yk/9C7vUtTzakbT8khtqGfjsJd4='; script-src-attr 'none'; style-src 'sha256-nylG61k1FhcFsJ+MLwkR8vmFLIo+5U7hL/KTQyA5oJU='; style-src-attr 'none'; form-action mailto: https:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'none'; img-src 'none'; font-src 'none'; script-src 'sha256-FUxHGLB1vfv58eV/yk/9C7vUtTzakbT8khtqGfjsJd4='; script-src-attr 'none'; style-src 'sha256-UFa619F3C3zmXF2ZyB0x9EsMA/kPrNompE18LWoX5l8='; style-src-attr 'none'; form-action mailto: https:">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LLM cost audits — Tracetally</title>
   <meta name="description" content="LLM cost and reliability audits from the author of tracetally. Work starts from exports you share. No production access is required.">
@@ -42,6 +42,7 @@
     button,
     .meta,
     .price-label,
+    .offer-kicker,
     .price-inr,
     .fine,
     .brand,
@@ -360,21 +361,63 @@
       font-weight: 500;
     }
     .tier ul {
-      margin: 0 0 1.2rem;
+      margin: 0.15rem 0 1.15rem;
       padding: 0;
       list-style: none;
       flex: 1;
     }
     .tier li {
       position: relative;
-      padding: 0.42rem 0 0.42rem 1.15rem;
+      margin: 0;
+      padding: 0.5rem 0 0.5rem 1.75rem;
       font-size: 0.96rem;
+      line-height: 1.45;
+    }
+    .tier li::before,
+    .tier li::after {
+      content: "";
+      position: absolute;
+      pointer-events: none;
     }
     .tier li::before {
-      content: "–";
-      position: absolute;
       left: 0;
+      top: 0.68rem;
+      width: 1.05rem;
+      height: 1.05rem;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .tier li::after {
+      left: 0.26rem;
+      top: 0.96rem;
+      width: 0.42rem;
+      height: 0.22rem;
+      border-left: 2px solid var(--card);
+      border-bottom: 2px solid var(--card);
+      transform: rotate(-45deg);
+    }
+    .offer {
+      margin: 1.35rem 0 0;
+      padding: 1.05rem 1.2rem 1.1rem;
+      background: var(--card);
+      border: 1px solid var(--accent);
+      border-radius: 12px;
+    }
+    .offer p { margin: 0; }
+    .offer-kicker {
+      margin: 0 0 0.4rem;
       color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .offer-text {
+      max-width: 40rem;
+      font-size: clamp(1.05rem, 2.1vw, 1.28rem);
+      font-weight: 600;
+      line-height: 1.4;
+      letter-spacing: -0.015em;
     }
     .tier .btn { width: 100%; margin-top: auto; }
     .fine {
@@ -671,7 +714,6 @@
               <li>Review of up to 5 prompt templates for token bloat and caching eligibility</li>
               <li>Top-5 findings, each with a rough monthly saving estimate</li>
               <li>A 4–6 page PDF and a 30-minute readout</li>
-              <li>The Quick Review fee is credited in full against a Full Audit booked within 30 days</li>
             </ul>
             <a class="btn btn-ghost" href="#request">Request a Quick Review</a>
           </article>
@@ -712,6 +754,11 @@
             <a class="btn btn-ghost" href="#request">Request Implementation</a>
           </article>
         </div>
+
+        <aside class="offer">
+          <p class="offer-kicker">Offer</p>
+          <p class="offer-text">The Quick Review fee is credited in full against a Full Audit booked within 30 days</p>
+        </aside>
 
         <p class="fine">Extra hours and change requests: $60/hr / ₹4,000/hr. Timelines start when the data is received. Prices exclude applicable taxes (including GST for Indian clients).</p>
       </div>
