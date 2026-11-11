@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'none'; img-src 'none'; font-src 'none'; script-src 'sha256-FUxHGLB1vfv58eV/yk/9C7vUtTzakbT8khtqGfjsJd4='; script-src-attr 'none'; style-src 'sha256-shWsrOQurdVVgOQBWivdT3GVdESJvjWhWGaewmHotfE='; style-src-attr 'none'; form-action mailto: https:">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LLM cost audits — tracetally</title>
   <meta name="description" content="LLM cost and reliability audits from the author of tracetally. Work starts from exports you share. No production access is required.">
@@ -525,6 +526,11 @@
       padding: 0;
     }
     footer p { margin: 0.35rem 0 0; max-width: 40rem; }
+    footer strong {
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 1rem;
+    }
 
     @media (max-width: 900px) {
       .steps, .tiers, .split, .privacy-grid { grid-template-columns: 1fr; }
@@ -545,10 +551,11 @@
 <body data-form-endpoint="">
   <!--
     FORM_ENDPOINT
-    Set the data-form-endpoint attribute on <body> to the form service URL
-    (for example a Formspree endpoint) once it exists. Leave it empty until
-    then. While it is empty, submit falls back to mailto:team.tracetally@gmail.com
-    with the subject "Audit request" and the field values in the body.
+    Set data-form-endpoint on body to an absolute https URL once a form
+    service exists. Leave it empty until then. Empty values, and any value
+    that is not an absolute https URL, fall back to
+    mailto:team.tracetally@gmail.com with the subject "Audit request"
+    and the field values in the body. http and javascript URLs are rejected.
     Keep this comment and the data-form-endpoint value in sync.
   -->
 
@@ -820,7 +827,7 @@
   <footer>
     <div class="wrap">
       <div>
-        <strong style="color:var(--ink);font-family:inherit;font-size:1rem;">tracetally</strong>
+        <strong>tracetally</strong>
         <p>LLM cost audits from the author of the open-source CLI.</p>
         <p>Prices exclude applicable taxes (including GST for Indian clients).</p>
       </div>
@@ -839,7 +846,6 @@
       if (!form) return;
       var status = document.getElementById("form-status");
       var mail = "team.tracetally@gmail.com";
-      var endpoint = (document.body.getAttribute("data-form-endpoint") || "").trim();
 
       function fieldValue(id) {
         var el = document.getElementById(id);
@@ -859,9 +865,21 @@
         ].join("\n");
       }
 
+      function httpsEndpoint(value) {
+        try {
+          var url = new URL((value || "").trim());
+          if (url.protocol !== "https:" || !url.hostname) return "";
+          if (url.href.indexOf("https://") !== 0) return "";
+          return url.href;
+        } catch (err) {
+          return "";
+        }
+      }
+
       form.addEventListener("submit", function (event) {
-        if (endpoint) {
-          form.setAttribute("action", endpoint);
+        var action = httpsEndpoint(document.body.getAttribute("data-form-endpoint"));
+        if (action) {
+          form.setAttribute("action", action);
           form.setAttribute("method", "post");
           form.removeAttribute("enctype");
           return;
