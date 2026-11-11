@@ -53,7 +53,7 @@ W4 reports and demo, on top of the W3 checks. Not a release.
   tokens are priced at the cached-input rate instead of being dropped.
 - A `v*` tag runs the release workflow. The 0.1.0 publish tag is `v0.1.0`:
   it builds the sdist and wheel and, after the `pypi` environment is
-  approved, uploads them with PyPI Trusted Publishing. `docs/index.html` is
+  approved, uploads them with PyPI Trusted Publishing. `docs/audit/index.html` is
   the static project page. Pages stays off until the repo is public and an
   owner selects Deploy from a branch, folder `/docs`.
 
