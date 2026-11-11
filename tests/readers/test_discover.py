@@ -22,6 +22,7 @@ from tracetally.readers.discover import (
     DEFAULT_MAX_FILE_SIZE,
     SKIP_DIR_NAMES,
     FoundRow,
+    SkipNote,
     depth_below,
     format_found_table,
     is_candidate_name,
@@ -237,3 +238,54 @@ def test_ambiguous_sniff_is_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert scanned.found == []
     assert scanned.skipped[0].path == path.name
     assert "ambiguous" in scanned.skipped[0].reason
+
+
+def test_symlink_root_and_ancestor_are_not_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = tmp_path / "real"
+    write_jsonl_records(real / "child", [call_record(record_id="secret-link")], name="secret.jsonl")
+    write_jsonl_records(real, [call_record(record_id="kept")], name="kept.jsonl")
+    try:
+        link_root = tmp_path / "link-root"
+        link_root.symlink_to(real / "child", target_is_directory=True)
+        linkparent = tmp_path / "linkparent"
+        linkparent.symlink_to(real, target_is_directory=True)
+        outside = tmp_path / "outside"
+        write_jsonl_records(outside, [call_record(record_id="outside")], name="outside.jsonl")
+        (real / "child-link").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available")
+
+    real_scandir = os.scandir
+
+    def scanning(path: os.PathLike[str] | str) -> os.ScandirIterator:
+        text = os.fspath(path).rstrip("\\/")
+        if text.endswith(f"{os.sep}link-root") or text.endswith(f"{os.sep}linkparent{os.sep}child"):
+            raise AssertionError(f"opened symlink path {text}")
+        return real_scandir(path)
+
+    monkeypatch.setattr("tracetally.readers.discover.os.scandir", scanning)
+    out = tmp_path / "out"
+    root_scan = scan_directories(
+        [link_root], max_depth=4, max_file_size=DEFAULT_MAX_FILE_SIZE, out_dir=out
+    )
+    assert root_scan.found == []
+    assert root_scan.skipped == [SkipNote("link-root", "symlink")]
+
+    ancestor = scan_directories(
+        [linkparent / "child"],
+        max_depth=4,
+        max_file_size=DEFAULT_MAX_FILE_SIZE,
+        out_dir=out,
+    )
+    assert ancestor.found == []
+    assert ancestor.skipped == [SkipNote("linkparent", "symlink")]
+
+    direct = scan_directories([real], max_depth=4, max_file_size=DEFAULT_MAX_FILE_SIZE, out_dir=out)
+    labels = {item.label for item in direct.found}
+    assert "kept.jsonl" in labels
+    assert "child/secret.jsonl" in labels
+    assert "outside.jsonl" not in labels
+    reasons = {note.path: note.reason for note in direct.skipped}
+    assert reasons["child-link"] == "symlink"

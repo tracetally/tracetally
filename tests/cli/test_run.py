@@ -213,6 +213,33 @@ def test_run_directory_is_scanned(tmp_path: Path) -> None:
     assert (out / "dashboard.html").is_file()
 
 
+def test_run_rejects_a_symlink_root_and_ancestor(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    write_jsonl_records(real / "child", [call_record(record_id="secret-link")], name="secret.jsonl")
+    try:
+        link_root = tmp_path / "link-root"
+        link_root.symlink_to(real / "child", target_is_directory=True)
+        linkparent = tmp_path / "linkparent"
+        linkparent.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available")
+    out = tmp_path / "out"
+    rooted = runner.invoke(
+        app, ["run", str(link_root), "--offline", "--out", str(out), "--no-open"]
+    )
+    assert rooted.exit_code == EXIT_OK, rooted.output
+    assert "No LLM usage file found" in rooted.stdout
+    assert "secret" not in rooted.stdout
+    assert not out.exists()
+    nested = runner.invoke(
+        app,
+        ["run", str(linkparent / "child"), "--offline", "--out", str(out), "--no-open"],
+    )
+    assert nested.exit_code == EXIT_OK, nested.output
+    assert "No LLM usage file found" in nested.stdout
+    assert not out.exists()
+
+
 def test_empty_directory_argument_prints_the_guide(tmp_path: Path) -> None:
     empty = tmp_path / "exports"
     empty.mkdir()

@@ -160,7 +160,12 @@ def scan_directories(
     max_file_size: int,
     out_dir: Path,
 ) -> ScanResult:
-    """Scan each root. Nested symlinks are not followed."""
+    """Scan each root. Symlinks are not followed.
+
+    A root that is a symlink, or that has a symlink ancestor such as
+    ``linkparent/child``, is skipped before any file in it is read. Symlinks
+    found under a real directory are skipped the same way.
+    """
     if max_depth < 0:
         raise UsageError("--max-depth must be >= 0")
     if max_file_size < 0:
@@ -185,6 +190,44 @@ def _absolute(path: Path) -> Path:
     return Path(os.path.abspath(os.fspath(path)))
 
 
+def _blocking_symlink(path: Path) -> Path | None:
+    """A symlink in ``path`` that must not be opened.
+
+    The scan root itself is always refused. An ancestor is refused too, so
+    ``linkparent/child`` is not listed by following ``linkparent``. macOS
+    ``/tmp``, ``/var``, and ``/etc`` are aliases of ``/private/...``; those
+    prefix aliases are not user links, and the rest of the path is still
+    checked. Nothing under the link is read.
+    """
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    current = Path(absolute.anchor)
+    parts = absolute.parts[1:]
+    for index, part in enumerate(parts):
+        current = current / part
+        try:
+            linked = os.path.islink(current)
+        except OSError:
+            return current
+        if not linked:
+            continue
+        final = index == len(parts) - 1
+        if final or not _is_platform_dir_alias(current):
+            return current
+    return None
+
+
+def _is_platform_dir_alias(path: Path) -> bool:
+    """True for the macOS top-level aliases of ``/private``."""
+    if path.parent != Path(path.anchor) or path.name not in {"tmp", "var", "etc"}:
+        return False
+    try:
+        target = os.readlink(path)
+    except OSError:
+        return False
+    normalized = target.replace("\\", "/").rstrip("/")
+    return normalized in {f"private/{path.name}", f"/private/{path.name}"}
+
+
 def _scan_one(
     root: Path,
     *,
@@ -197,6 +240,10 @@ def _scan_one(
     seen_inodes: set[tuple[int, int]] = set()
     abs_root = _absolute(root)
     abs_out = _absolute(out_dir)
+    blocked = _blocking_symlink(root)
+    if blocked is not None:
+        skipped.append(SkipNote(blocked.name or str(root), "symlink"))
+        return ScanResult(found=found, skipped=skipped)
 
     def label(path: Path) -> str:
         return relative_display(_absolute(path), abs_root)
