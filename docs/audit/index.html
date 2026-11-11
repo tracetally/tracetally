@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'none'; img-src 'none'; font-src 'none'; script-src 'sha256-FUxHGLB1vfv58eV/yk/9C7vUtTzakbT8khtqGfjsJd4='; script-src-attr 'none'; style-src 'sha256-KO+PlXr7DjsULNUl411xAMJ8LwkW0m1jeQ1sKDTV+qY='; style-src-attr 'none'; form-action mailto: https:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'none'; img-src 'none'; font-src 'none'; script-src 'sha256-FUxHGLB1vfv58eV/yk/9C7vUtTzakbT8khtqGfjsJd4='; script-src-attr 'none'; style-src 'sha256-nylG61k1FhcFsJ+MLwkR8vmFLIo+5U7hL/KTQyA5oJU='; style-src-attr 'none'; form-action mailto: https:">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LLM cost audits — tracetally</title>
+  <title>LLM cost audits — Tracetally</title>
   <meta name="description" content="LLM cost and reliability audits from the author of tracetally. Work starts from exports you share. No production access is required.">
   <style>
     :root {
@@ -44,6 +44,7 @@
     .price-label,
     .price-inr,
     .fine,
+    .brand,
     .nav-brand span,
     footer,
     .skip,
@@ -82,8 +83,20 @@
 
     /* Header */
     header.site {
+      position: sticky;
+      top: 0;
+      z-index: 10;
       border-bottom: 1px solid var(--line);
       background: rgba(244, 240, 232, 0.92);
+      backdrop-filter: blur(10px);
+    }
+    .brand {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1.28rem;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+      line-height: 1;
     }
     .site-bar {
       display: flex;
@@ -174,13 +187,21 @@
     }
     h1 {
       margin: 0;
-      font-size: clamp(2rem, 4.4vw, 3.15rem);
+      font-size: clamp(2.7rem, 6vw, 4.25rem);
       font-weight: 600;
-      line-height: 1.15;
+      line-height: 1.02;
+      letter-spacing: -0.035em;
+    }
+    .headline {
+      margin: 0.85rem 0 0;
+      max-width: 16em;
+      font-size: clamp(1.35rem, 2.5vw, 1.85rem);
+      font-weight: 600;
+      line-height: 1.25;
       letter-spacing: -0.02em;
     }
     .tagline {
-      margin: 1.15rem 0 0;
+      margin: 0.9rem 0 0;
       font-size: clamp(1.2rem, 2.2vw, 1.5rem);
       line-height: 1.35;
       max-width: 36rem;
@@ -294,7 +315,7 @@
     }
     .tier.featured {
       border-color: var(--accent);
-      box-shadow: 0 10px 28px rgba(28, 25, 21, 0.06);
+      box-shadow: 0 18px 40px rgba(28, 25, 21, 0.08);
     }
     .tier h3 {
       margin: 0;
@@ -492,9 +513,10 @@
     select,
     textarea {
       width: 100%;
-      padding: 0.65rem 0.7rem;
+      min-height: 2.75rem;
+      padding: 0.7rem 0.75rem;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 8px;
       background: #fff;
       color: var(--ink);
       font-size: 1rem;
@@ -548,8 +570,11 @@
     @media (max-width: 600px) {
       .wrap { width: min(1080px, calc(100% - 1.5rem)); }
       section { padding: 2.4rem 0; }
-      .hero { padding: 2.6rem 0 2rem; }
+      .hero { padding: 2.4rem 0 2rem; }
+      h1 { font-size: 2.55rem; }
       .steps { grid-template-columns: 1fr; }
+      .site-bar { align-items: flex-start; }
+      .cta-row .btn { flex: 1 1 12rem; }
       nav .btn { padding: 0.55rem 0.8rem; }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -572,7 +597,7 @@
 
   <header class="site">
     <div class="wrap site-bar">
-      <a class="nav-brand" href="../">tracetally<span>Project home</span></a>
+      <p class="brand">Tracetally</p>
       <nav aria-label="Page">
         <ul>
           <li><a href="#how">How it works</a></li>
@@ -589,9 +614,10 @@
     <section class="hero">
       <div class="wrap">
         <p class="kicker">LLM cost audits from the tracetally author</p>
-        <h1>LLM cost and reliability audits</h1>
+        <h1>Tracetally</h1>
+        <p class="headline">LLM cost and reliability audits</p>
         <p class="tagline">Your LLM bill tells you the total. tracetally tells you why.</p>
-        <p class="lead">Arockia Reegan, author of the open-source tracetally CLI, works from usage and trace exports you already have. You get a ranked, quantified plan: where the token spend goes, what is wasted, what breaks, and what to fix first. Your team ships the fixes, or Arockia ships them in the third tier.</p>
+        <p class="lead">Reegan, author of the open-source tracetally CLI, works from usage and trace exports you already have. You get a ranked, quantified plan: where the token spend goes, what is wasted, what breaks, and what to fix first. Your team ships the fixes, or Reegan ships them in the third tier.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="#request">Request an audit</a>
           <a class="btn btn-ghost" href="#tiers">See the tiers</a>
@@ -789,7 +815,7 @@
       <div class="wrap">
         <p class="kicker">Get in touch</p>
         <h2>Request an audit</h2>
-        <p class="section-lead">Tell Arockia a little about your stack and spend. He replies by email to schedule a call. There is no booking calendar.</p>
+        <p class="section-lead">Tell Reegan a little about your stack and spend. He replies by email to schedule a call. There is no booking calendar.</p>
 
         <form
           id="audit-form"
@@ -830,7 +856,7 @@
           </div>
           <p class="form-foot">Sending opens an email draft to team.tracetally@gmail.com. It does not send the email or submit the request automatically.</p>
           <button class="btn btn-primary" type="submit">Send request</button>
-          <p class="form-foot">Or email <a href="mailto:team.tracetally@gmail.com?subject=Audit%20request">team.tracetally@gmail.com</a> directly. Arockia will reply by email to schedule.</p>
+          <p class="form-foot">Or email <a href="mailto:team.tracetally@gmail.com?subject=Audit%20request">team.tracetally@gmail.com</a> directly. Reegan will reply by email to schedule.</p>
           <p id="form-status" class="form-status" role="status" aria-live="polite"></p>
         </form>
       </div>
@@ -840,14 +866,13 @@
   <footer>
     <div class="wrap">
       <div>
-        <strong>tracetally</strong>
+        <strong>Tracetally</strong>
         <p>LLM cost audits from the author of the open-source CLI.</p>
         <p>Prices exclude applicable taxes (including GST for Indian clients).</p>
       </div>
       <ul>
-        <li><a href="../">Project home</a></li>
         <li><a href="https://github.com/tracetally/tracetally">GitHub</a></li>
-        <li><a href="../"><code class="code">pip install tracetally</code></a></li>
+        <li><code class="code">pip install tracetally</code></li>
         <li><a href="mailto:team.tracetally@gmail.com">team.tracetally@gmail.com</a></li>
       </ul>
     </div>

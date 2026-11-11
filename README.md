@@ -260,13 +260,13 @@ Pushing a tag that matches `v*` runs `.github/workflows/release.yml`. For this r
 
 ## Project page
 
-`docs/index.html` is the static page for `https://tracetally.github.io/tracetally/`. CSS is inline. The page does not load remote fonts or scripts. Pages is not enabled from this repo.
+`docs/audit/index.html` is the static page for `https://tracetally.github.io/tracetally/audit/`. CSS is inline. The page does not load remote fonts or scripts. Pages is not enabled from this repo.
 
 After the repository is public, an owner turns it on in the GitHub settings (this is a click in the UI, not a workflow):
 
 Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: the default branch (`main`) → Folder: `/docs` → Save.
 
-No custom domain. The site is the project URL above once that save succeeds.
+No custom domain. Once that save succeeds, the page is `https://tracetally.github.io/tracetally/audit/`.
 
 ## License
 
