@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'none'; img-src 'none'; font-src 'none'; script-src 'sha256-FUxHGLB1vfv58eV/yk/9C7vUtTzakbT8khtqGfjsJd4='; script-src-attr 'none'; style-src 'sha256-shWsrOQurdVVgOQBWivdT3GVdESJvjWhWGaewmHotfE='; style-src-attr 'none'; form-action mailto: https:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'none'; img-src 'none'; font-src 'none'; script-src 'sha256-FUxHGLB1vfv58eV/yk/9C7vUtTzakbT8khtqGfjsJd4='; script-src-attr 'none'; style-src 'sha256-KO+PlXr7DjsULNUl411xAMJ8LwkW0m1jeQ1sKDTV+qY='; style-src-attr 'none'; form-action mailto: https:">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LLM cost audits — tracetally</title>
   <meta name="description" content="LLM cost and reliability audits from the author of tracetally. Work starts from exports you share. No production access is required.">
@@ -41,6 +41,7 @@
     textarea,
     button,
     .meta,
+    .price-label,
     .price-inr,
     .fine,
     .nav-brand span,
@@ -304,8 +305,16 @@
       color: var(--muted);
       font-size: 0.95rem;
     }
-    .price {
+    .price-label {
       margin: 1.05rem 0 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .price {
+      margin: 0.35rem 0 0;
       font-size: 2.05rem;
       font-weight: 600;
       letter-spacing: -0.03em;
@@ -627,6 +636,7 @@
           <article class="tier">
             <h3>Quick Review</h3>
             <p class="sub">Where is the money going?</p>
+            <p class="price-label">Founding price</p>
             <p class="price">$250</p>
             <p class="price-inr">₹20,000</p>
             <p class="meta"><span>About 7–10 days</span><span>1 provider</span></p>
@@ -643,6 +653,7 @@
           <article class="tier featured">
             <h3>Full Audit</h3>
             <p class="sub">Cost and reliability, end to end</p>
+            <p class="price-label">Founding price</p>
             <p class="price">$1,200</p>
             <p class="price-inr">₹80,000</p>
             <p class="meta"><span>About 3–4 weeks</span><span>Up to 3 providers</span></p>
@@ -661,6 +672,7 @@
           <article class="tier">
             <h3>Audit + Implementation</h3>
             <p class="sub">Find it, fix it, prove it</p>
+            <p class="price-label">Founding price</p>
             <p class="price">$3,000</p>
             <p class="price-inr">₹2,20,000</p>
             <p class="meta"><span>About 8–10 weeks</span><span>Top 3–5 fixes</span></p>
@@ -816,6 +828,7 @@
             <label for="times">Preferred times for a call <span class="hint">Optional. Time zone helpful.</span></label>
             <input id="times" name="Preferred times for a call" type="text" autocomplete="off">
           </div>
+          <p class="form-foot">Sending opens an email draft to team.tracetally@gmail.com. It does not send the email or submit the request automatically.</p>
           <button class="btn btn-primary" type="submit">Send request</button>
           <p class="form-foot">Or email <a href="mailto:team.tracetally@gmail.com?subject=Audit%20request">team.tracetally@gmail.com</a> directly. Arockia will reply by email to schedule.</p>
           <p id="form-status" class="form-status" role="status" aria-live="polite"></p>
