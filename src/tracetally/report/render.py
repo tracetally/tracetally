@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
+import shutil
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -15,14 +18,23 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from markupsafe import Markup
 
 from tracetally import __version__
-from tracetally.analysis.engine import ANALYZE_METHODOLOGY, RELIABILITY_CHECKS, Analysis
-from tracetally.analysis.summary import METHODOLOGY, GroupSummary, Summary
+from tracetally._cta import AUDIT_CTA_TEXT, AUDIT_CTA_URL
+from tracetally.analysis.engine import (
+    ANALYZE_METHODOLOGY,
+    RELIABILITY_CHECKS,
+    Analysis,
+    cost_label,
+    rank_findings,
+    unknown_cost,
+)
+from tracetally.analysis.summary import GroupSummary, Summary
 from tracetally.core.errors import UsageError
 from tracetally.core.hashing import CONTENT_RETAIN_CHARS
 from tracetally.core.money import format_usd, money_text
 from tracetally.core.schema import Finding, InputDigest, RunResult
 from tracetally.core.stats import rate
 from tracetally.core.store import TraceStore
+from tracetally.report.dashboard import render_dashboard
 from tracetally.report.links import EVALS_URL, PROJECT_URL
 from tracetally.report.redact import redact_analysis
 from tracetally.report.svg import bar_chart, empty_chart, latency_chart
@@ -42,16 +54,23 @@ class ReportOptions:
     include_content: bool = False
     content_requested: bool = False
     footer: bool = True
-    synthetic: bool = False
-    demo_seed: int | None = None
     generated_at: datetime | None = None
     redact_salt: str | None = None
+    dashboard: bool = False
 
 
 @dataclass(frozen=True)
 class WrittenReport:
     markdown: Path
     html: Path
+    findings: Path
+    analysis: Analysis
+
+
+@dataclass(frozen=True)
+class WrittenRun:
+    markdown: Path
+    dashboard: Path
     findings: Path
     analysis: Analysis
 
@@ -78,6 +97,108 @@ def write_report(store: TraceStore, analysis: Analysis, options: ReportOptions) 
     return WrittenReport(markdown=md_path, html=html_path, findings=json_path, analysis=shown)
 
 
+def write_run(store: TraceStore, analysis: Analysis, options: ReportOptions) -> WrittenRun:
+    """Write findings.json, report.md, and dashboard.html as one directory."""
+    ranked = rank_findings(list(analysis.findings))
+    shown = Analysis(
+        summary=analysis.summary,
+        findings=ranked,
+        skipped=list(analysis.skipped),
+        monthly_factor=analysis.monthly_factor,
+        monthly_caveats=list(analysis.monthly_caveats),
+    )
+    run_options = ReportOptions(
+        out=options.out,
+        redact=options.redact,
+        include_content=options.include_content,
+        content_requested=options.content_requested,
+        footer=options.footer,
+        generated_at=options.generated_at,
+        redact_salt=options.redact_salt,
+        dashboard=True,
+    )
+    content_in_report = run_options.include_content and not run_options.redact
+    excerpts = _excerpt_map(store, shown) if content_in_report else {}
+    if run_options.redact:
+        salt = run_options.redact_salt or secrets.token_hex(16)
+        shown = redact_analysis(shown, store, salt)
+        ranked = shown.findings
+    context = _context(shown, run_options, excerpts, content_in_report=content_in_report)
+    markdown = _environment(autoescape=False).get_template("report.md.j2").render(context)
+    document = _document(
+        shown,
+        run_options,
+        excerpts,
+        content_in_report=content_in_report,
+        records_dropped=store.records_dropped,
+    )
+    _annotate_run_document(document, shown.findings)
+    html = render_dashboard(document)
+    paths = _write_atomic_dir(
+        run_options.out,
+        {
+            "report.md": markdown if markdown.endswith("\n") else markdown + "\n",
+            "dashboard.html": html,
+            "findings.json": json.dumps(document, indent=2) + "\n",
+        },
+    )
+    return WrittenRun(
+        markdown=paths["report.md"],
+        dashboard=paths["dashboard.html"],
+        findings=paths["findings.json"],
+        analysis=shown,
+    )
+
+
+def _annotate_run_document(document: dict[str, Any], findings: list[Any]) -> None:
+    document["cta_text"] = AUDIT_CTA_TEXT
+    document["cta_url"] = AUDIT_CTA_URL
+    rows = document.get("findings")
+    if not isinstance(rows, list):
+        return
+    for raw, item in zip(rows, findings, strict=True):
+        if not isinstance(raw, dict):
+            continue
+        raw["cost_known"] = not unknown_cost(item)
+        raw["cost_label"] = cost_label(item, str(document.get("currency") or "USD"))
+
+
+def _normal_dir_mode() -> int:
+    """Directory mode ``0o755`` with the process umask applied.
+
+    ``mkdtemp`` creates ``0o700``. A report folder should follow the umask the
+    way ``mkdir`` does.
+    """
+    current = os.umask(0)
+    os.umask(current)
+    return 0o755 & ~current & 0o777
+
+
+def _write_atomic_dir(out: Path, files: dict[str, str]) -> dict[str, Path]:
+    """Publish ``files`` into ``out``. A new directory appears in one rename."""
+    if out.exists() and not out.is_dir():
+        raise UsageError(f"--out exists and is not a directory: {out}")
+    parent = out.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".tracetally-", dir=parent))
+    os.chmod(staging, _normal_dir_mode())
+    try:
+        for name, text in files.items():
+            payload = text if text.endswith("\n") else text + "\n"
+            (staging / name).write_text(payload, encoding="utf-8", newline="\n")
+        if not out.exists():
+            os.replace(staging, out)
+        else:
+            for name in files:
+                os.replace(staging / name, out / name)
+            shutil.rmtree(staging)
+    except Exception:
+        if staging.exists() and staging != out:
+            shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return {name: out / name for name in files}
+
+
 def _prepare_dir(path: Path) -> Path:
     if path.exists() and not path.is_dir():
         raise UsageError(f"--out exists and is not a directory: {path}")
@@ -99,13 +220,38 @@ def _environment(*, autoescape: bool) -> Environment:
         undefined=StrictUndefined,
         trim_blocks=True,
         lstrip_blocks=True,
+        finalize=None if autoescape else markdown_text,
     )
-    env.filters["md_cell"] = _md_cell
     return env
 
 
-def _md_cell(value: object) -> str:
-    return str(value).replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+def markdown_text(value: object) -> str:
+    """One Markdown-safe rendering of a value interpolated into ``report.md``.
+
+    ``<``, ``>``, and ``&`` become HTML entities. Backticks, brackets, and
+    pipes cannot open a code span, a link, or a table cell. CR, LF, and other
+    C0/C1 controls become spaces, so a newline cannot start a heading.
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    flattened: list[str] = []
+    for char in text:
+        code = ord(char)
+        if code < 32 or code == 127 or 0x80 <= code <= 0x9F or char in {"\u2028", "\u2029"}:
+            flattened.append(" ")
+        else:
+            flattened.append(char)
+    safe = "".join(flattened)
+    return (
+        safe.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("`", "&#96;")
+        .replace("[", "&#91;")
+        .replace("]", "&#93;")
+        .replace("|", "&#124;")
+    )
 
 
 def _context(
@@ -117,11 +263,13 @@ def _context(
 ) -> dict[str, Any]:
     summary = analysis.summary
     savings, what_ifs = _split_totals(analysis.findings)
+    currency = summary.currency
     cards = [
-        _card(item, rank, excerpts) for rank, item in enumerate(_dollar(analysis.findings), start=1)
+        _card(item, rank, excerpts, currency)
+        for rank, item in enumerate(_dollar(analysis.findings), start=1)
     ]
     reliability = [
-        _card(item, index, excerpts)
+        _card(item, index, excerpts, currency)
         for index, item in enumerate(_reliability(analysis.findings), start=1)
     ]
     observed = summary.cost_usd
@@ -129,8 +277,6 @@ def _context(
     return {
         "version": __version__,
         "generated_at": _generated_at(options),
-        "synthetic": options.synthetic,
-        "demo_seed": options.demo_seed,
         "redacted": options.redact,
         "include_content": content_in_report,
         "footer": options.footer,
@@ -138,7 +284,18 @@ def _context(
         "evals_url": EVALS_URL,
         "price_table_id": summary.price_table_id,
         "price_retrieved_on": summary.price_table_retrieved_on,
+        "price_source": summary.price_source,
+        "price_url": summary.price_url,
+        "price_sha256": summary.price_sha256,
+        "priced_share": summary.priced_share,
+        "show_discount": summary.show_discount,
+        "list_observed": format_usd(summary.list_cost_usd),
         "currency": summary.currency,
+        "fx_rate": summary.fx_rate,
+        "fx_user_supplied": summary.fx_user_supplied,
+        "billed_cost": format_usd(summary.billed_cost_usd),
+        "inferred_cost": format_usd(summary.inferred_cost_usd),
+        "cost_gap": summary.cost_gap,
         "mode": summary.mode,
         "cost_only": summary.mode == "cost-only",
         "window_start": _iso(summary.time_start),
@@ -176,6 +333,9 @@ def _context(
         },
         "style": Markup(_css()),
         "schema_version": _SCHEMA_VERSION,
+        "cta_text": AUDIT_CTA_TEXT,
+        "cta_url": AUDIT_CTA_URL,
+        "dashboard": options.dashboard,
     }
 
 
@@ -185,6 +345,7 @@ def _document(
     excerpts: dict[str, list[dict[str, str]]],
     *,
     content_in_report: bool,
+    records_dropped: int = 0,
 ) -> dict[str, Any]:
     summary = analysis.summary
     savings, what_ifs = _split_totals(analysis.findings)
@@ -199,14 +360,17 @@ def _document(
     result = RunResult(
         tracetally_version=__version__,
         generated_at=_generated_at(options),
-        synthetic=options.synthetic,
-        demo_seed=options.demo_seed,
         redacted=options.redact,
         include_content=content_in_report,
         show_footer=options.footer,
         price_table_id=summary.price_table_id,
         price_table_retrieved_on=summary.price_table_retrieved_on,
+        price_source=summary.price_source,
+        price_url=summary.price_url,
+        price_sha256=summary.price_sha256,
+        priced_share=summary.priced_share,
         currency=summary.currency,
+        fx_rate=summary.fx_rate,
         methodology="\n\n".join(
             _methodology(analysis, options, content_in_report=content_in_report)
         ),
@@ -216,7 +380,14 @@ def _document(
             "calls": summary.calls,
             "priced_calls": summary.priced_calls,
             "unpriced_calls": summary.unpriced_calls,
+            "priced_share": summary.priced_share,
             "observed_cost_usd": money_text(observed),
+            "billed_cost_usd": money_text(summary.billed_cost_usd),
+            "inferred_cost_usd": money_text(summary.inferred_cost_usd),
+            "cost_gap": summary.cost_gap,
+            "fx_rate": summary.fx_rate,
+            "fx_user_supplied": summary.fx_user_supplied,
+            "list_cost_usd": money_text(summary.list_cost_usd),
             "est_monthly_spend_usd": money_text(monthly),
             "est_monthly_savings_usd": _range_json(savings),
             "est_monthly_what_if_usd": _range_json(what_ifs),
@@ -226,6 +397,7 @@ def _document(
         skipped_checks=list(analysis.skipped),
         inputs=[_input_digest(item) for item in summary.inputs],
         warnings=list(summary.warnings),
+        records_dropped=records_dropped,
         content_excerpts=flat,
     )
     return result.model_dump(mode="json")
@@ -281,7 +453,12 @@ def _excerpt_map(store: TraceStore, analysis: Analysis) -> dict[str, list[dict[s
     return found
 
 
-def _card(item: Finding, rank: int, excerpts: dict[str, list[dict[str, str]]]) -> dict[str, Any]:
+def _card(
+    item: Finding,
+    rank: int,
+    excerpts: dict[str, list[dict[str, str]]],
+    currency: str,
+) -> dict[str, Any]:
     amounts = item.est_monthly_usd
     has_dollars = not (amounts.mid == 0 and amounts.high == 0)
     return {
@@ -295,6 +472,8 @@ def _card(item: Finding, rank: int, excerpts: dict[str, list[dict[str, str]]]) -
         "confidence": item.confidence.value,
         "what_if": item.what_if,
         "has_dollars": has_dollars,
+        "unknown_cost": unknown_cost(item),
+        "cost_label": cost_label(item, currency),
         "low": format_usd(amounts.low),
         "mid": format_usd(amounts.mid),
         "high": format_usd(amounts.high),
@@ -324,9 +503,7 @@ def _reliability(findings: list[Finding]) -> list[Finding]:
 
 
 def _reliability_item(item: Finding) -> bool:
-    amounts = item.est_monthly_usd
-    zero = amounts.mid == 0 and amounts.high == 0
-    return item.check in RELIABILITY_CHECKS or zero
+    return item.check in RELIABILITY_CHECKS
 
 
 def _split_totals(
@@ -356,16 +533,28 @@ def _range_json(amounts: tuple[Decimal, Decimal, Decimal]) -> dict[str, str]:
     }
 
 
+def _labelled(group: GroupSummary) -> str:
+    if group.price_label:
+        return f"{group.model} ({group.price_label})"
+    return group.model
+
+
+def _report_cost(group: GroupSummary) -> str:
+    if group.list_cost_usd is not None and group.cost_usd is not None:
+        return f"{format_usd(group.list_cost_usd)} list / {format_usd(group.cost_usd)} effective"
+    return format_usd(group.cost_usd)
+
+
 def _model_row(group: GroupSummary, measured: bool) -> dict[str, str]:
     latency = group.latency()
     return {
         "provider": group.provider,
-        "model": group.model,
+        "model": _labelled(group),
         "requests": str(group.requests),
         "input_tokens": str(group.input_tokens),
         "cached_input_tokens": str(group.cached_input_tokens),
         "output_tokens": str(group.output_tokens),
-        "cost": format_usd(group.cost_usd),
+        "cost": _report_cost(group),
         "n": str(latency.n),
         "p50": _lat(latency.p50, latency.hidden, measured),
         "p95": _lat(latency.p95, latency.hidden, measured),
@@ -406,10 +595,11 @@ def _methodology(
 ) -> list[str]:
     summary = analysis.summary
     paragraphs = [
-        METHODOLOGY,
+        analysis.summary.methodology,
         ANALYZE_METHODOLOGY,
         (
-            f"Price table {summary.price_table_id}, retrieved {summary.price_table_retrieved_on}. "
+            f"Prices {summary.price_source} from {summary.price_url}, "
+            f"retrieved {summary.price_table_retrieved_on}, sha256 {summary.price_sha256}. "
             f"Currency {summary.currency}. Monthly factor {money_text(analysis.monthly_factor)} "
             "(observed dollars times 30 / window days, with a 1-day floor)."
         ),
@@ -419,17 +609,10 @@ def _methodology(
             "Findings are ranked by estimated monthly dollars (mid), then confidence. "
             "Reliability findings with no dollars are in their own section."
         ),
-        "Offline. No network calls. No telemetry. "
+        "No telemetry. The only network request tracetally makes is the LiteLLM price file, "
+        "and this run records which copy it used. "
         "tracetally is not a proxy, gateway, SDK, or server.",
     ]
-    if options.synthetic:
-        seed = "" if options.demo_seed is None else f" Seed {options.demo_seed}."
-        paragraphs.append(
-            "SYNTHETIC DATA. The Acme Support Bot rows are a fixed planted sample, "
-            "not a customer export."
-            + seed
-            + " The seed labels the run and does not redraw the rows."
-        )
     return paragraphs
 
 

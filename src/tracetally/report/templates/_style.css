@@ -39,19 +39,6 @@ p, li { font-size: 1rem; }
 .muted, .meta { color: var(--muted); }
 .meta { font-family: ui-sans-serif, sans-serif; font-size: 0.82rem; overflow-wrap: anywhere; }
 
-.banner {
-  border: 2px solid var(--accent);
-  background: #f8ebe6;
-  padding: 0.8rem 1rem;
-  margin: 0 0 1.25rem;
-}
-.banner strong {
-  display: block;
-  letter-spacing: 0.08em;
-  font-family: ui-sans-serif, sans-serif;
-  font-size: 0.85rem;
-}
-
 .summary {
   background: var(--card);
   border: 1px solid var(--line);

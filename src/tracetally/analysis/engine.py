@@ -17,12 +17,13 @@ from tracetally import __version__
 from tracetally.analysis.checks import CHECKS, Check
 from tracetally.analysis.checks.common import monthly_factor
 from tracetally.analysis.skip import PLANNED_CHECKS, missing_capability_reason
-from tracetally.analysis.summary import METHODOLOGY, Summary, summarize
+from tracetally.analysis.summary import Summary, summarize
 from tracetally.config import AnalyzeConfig
 from tracetally.core.errors import UsageError
 from tracetally.core.money import format_usd
 from tracetally.core.schema import Capability, Finding, Level, SkippedCheck
 from tracetally.core.store import TraceStore
+from tracetally.core.terminal import terminal_safe
 from tracetally.pricing.table import PriceTable
 
 ANALYZE_SCHEMA_VERSION = 1
@@ -34,11 +35,14 @@ ANALYZE_METHODOLOGY = (
     "Monthly dollars are observed dollars × (30 / window days), with a 1-day floor. "
     "Token bloat uses adoption 25/50/75%. Cache opportunity uses hit rates 50/75/90% "
     "on tokens that are not already cached. Batch candidates use 50/75/100% of calls "
-    "movable, and the batch price follows the price file's batch_cached rule rather "
-    "than halving every token. Retry waste and agent loops are observed spend, so "
-    "low, mid, and high match. Model swap is a what-if: price only, validate quality "
-    "with evals. It is not added to the savings total."
+    "movable, and the batch price is the published batch rate rather than a flat "
+    "half of every token. Retry waste and agent loops are observed spend, so "
+    "low, mid, and high match. Those savings are estimates: they are repriced from "
+    "token counts and list rates, not from a billed cost. Model swap is a what-if: "
+    "price only, validate quality with evals. It is not added to the savings total."
 )
+
+_ESTIMATE_CAVEAT = "Estimate: repriced from token counts and list rates, not from a billed cost."
 
 
 @dataclass
@@ -71,8 +75,12 @@ class Analysis:
             "tracetally_version": __version__,
             "price_table_id": self.summary.price_table_id,
             "price_table_retrieved_on": self.summary.price_table_retrieved_on,
+            "price_source": self.summary.price_source,
+            "price_url": self.summary.price_url,
+            "price_sha256": self.summary.price_sha256,
+            "priced_share": self.summary.priced_share,
             "currency": self.summary.currency,
-            "methodology": METHODOLOGY + " " + ANALYZE_METHODOLOGY,
+            "methodology": self.summary.methodology + " " + ANALYZE_METHODOLOGY,
             "monthly": {
                 "factor": _money(self.monthly_factor),
                 "window_start": _iso(self.summary.time_start),
@@ -82,7 +90,9 @@ class Analysis:
             "totals": {
                 "calls": self.summary.calls,
                 "priced_calls": self.summary.priced_calls,
+                "priced_share": self.summary.priced_share,
                 "observed_cost_usd": _money(self.summary.cost_usd),
+                "list_cost_usd": _money(self.summary.list_cost_usd),
                 "est_monthly_savings_usd": _range_sum(savings),
                 "est_monthly_what_if_usd": _range_sum(what_ifs),
             },
@@ -108,11 +118,14 @@ class Analysis:
         summary = self.summary
         console.print(
             f"tracetally {__version__} analyze  "
-            f"price table {summary.price_table_id} (retrieved {summary.price_table_retrieved_on})"
+            f"prices {summary.price_source} retrieved {summary.price_table_retrieved_on}  "
+            f"{summary.price_url}"
         )
+        console.print(f"sha256 {summary.price_sha256}")
         console.print(
-            f"calls {summary.calls}  priced {summary.priced_calls}/{summary.calls}  "
-            f"observed cost {format_usd(summary.cost_usd)} {summary.currency}  "
+            f"calls {summary.calls}  priced {summary.priced_calls}/{summary.calls} "
+            f"({summary.priced_share})  "
+            f"observed cost {format_usd(summary.cost_usd)} {terminal_safe(summary.currency)}  "
             f"monthly factor {_money(self.monthly_factor)}"
         )
         window = f"{_iso(summary.time_start) or '-'} to {_iso(summary.time_end) or '-'}"
@@ -150,16 +163,19 @@ class Analysis:
         if self.skipped:
             console.print("Skipped checks")
             for skipped in self.skipped:
-                console.print(f"- {skipped.check}: {skipped.reason}")
+                console.print(f"- {terminal_safe(skipped.check)}: {terminal_safe(skipped.reason)}")
             console.print()
         if self.summary.warnings:
             console.print("Warnings")
             for warning in self.summary.warnings:
-                console.print(f"- {warning}")
+                console.print(f"- {terminal_safe(warning)}")
             console.print()
-        console.print(METHODOLOGY)
+        console.print(self.summary.methodology)
         console.print(ANALYZE_METHODOLOGY)
-        console.print("Offline. No network calls. No telemetry.")
+        console.print(
+            f"No telemetry. Prices {summary.price_source} ({summary.price_table_retrieved_on}). "
+            "tracetally is not a proxy, gateway, or middleware."
+        )
         return buffer.getvalue()
 
 
@@ -179,6 +195,11 @@ def analyze(store: TraceStore, table: PriceTable, cfg: AnalyzeConfig | None = No
             skipped.append(SkippedCheck(check=check.id, reason=reason))
             continue
         findings.extend(check.run(store, table, selected))
+    for item in findings:
+        if item.check in RELIABILITY_CHECKS or _zero(item):
+            continue
+        if _ESTIMATE_CAVEAT not in item.caveats:
+            item.caveats.append(_ESTIMATE_CAVEAT)
     findings.sort(key=_rank)
     return Analysis(
         summary=summary,
@@ -224,6 +245,46 @@ def _skip_reason(
     return None
 
 
+def unknown_cost(item: Finding) -> bool:
+    """A savings finding whose dollars could not be estimated.
+
+    Reliability findings are a known zero. A savings check that priced nothing
+    is unknown and sorts after every estimated finding.
+    """
+    if item.check in RELIABILITY_CHECKS:
+        return False
+    amounts = item.est_monthly_usd
+    return amounts.low == 0 and amounts.mid == 0 and amounts.high == 0
+
+
+def cost_label(item: Finding, currency: str) -> str:
+    if unknown_cost(item):
+        return "unknown cost"
+    if item.check in RELIABILITY_CHECKS or _zero(item):
+        return "no dollar estimate"
+    return f"{format_usd(item.est_monthly_usd.mid)} {currency}/mo"
+
+
+def rank_findings(findings: list[Finding]) -> list[Finding]:
+    """Estimated dollars saved, descending. Unknown cost is last."""
+    return sorted(findings, key=_run_rank)
+
+
+def _run_rank(item: Finding) -> tuple[int, Decimal, int, str]:
+    if unknown_cost(item):
+        section = 2
+    elif item.check in RELIABILITY_CHECKS or _zero(item):
+        section = 1
+    else:
+        section = 0
+    return (
+        section,
+        -item.est_monthly_usd.mid,
+        -_CONFIDENCE_RANK.get(item.confidence, 0),
+        item.id,
+    )
+
+
 def _rank(item: Finding) -> tuple[int, Decimal, int, str]:
     section = 1 if item.check in RELIABILITY_CHECKS or _zero(item) else 0
     return (
@@ -256,7 +317,7 @@ def _findings_table(title: str, findings: list[Finding]) -> Table:
         endpoint = item.evidence[0].endpoint if item.evidence else ""
         table.add_row(
             item.check,
-            endpoint or "",
+            terminal_safe(endpoint or ""),
             format_usd(item.est_monthly_usd.low),
             format_usd(item.est_monthly_usd.mid),
             format_usd(item.est_monthly_usd.high),
@@ -270,14 +331,14 @@ def _findings_table(title: str, findings: list[Finding]) -> Table:
 
 def _print_finding(console: Console, item: Finding) -> None:
     label = " what-if" if item.what_if else ""
-    console.print(f"{item.id}{label}")
-    console.print(f"  {item.title}")
-    console.print(f"  {item.recommendation}")
+    console.print(f"{terminal_safe(item.id)}{label}")
+    console.print(f"  {terminal_safe(item.title)}")
+    console.print(f"  {terminal_safe(item.recommendation)}")
     for row in item.evidence:
         if row.detail:
-            console.print(f"  evidence: {row.detail}")
+            console.print(f"  evidence: {terminal_safe(row.detail)}")
     for caveat in item.caveats:
-        console.print(f"  caveat: {caveat}")
+        console.print(f"  caveat: {terminal_safe(caveat)}")
     console.print()
 
 

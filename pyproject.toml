@@ -9,7 +9,7 @@ description = "Offline cost and reliability audit for exported LLM traces."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Arockia" }]
 keywords = ["llm", "opentelemetry", "cost", "observability", "cli"]
 classifiers = [
@@ -63,7 +63,8 @@ Changelog = "https://github.com/tracetally/tracetally/blob/main/CHANGELOG.md"
 packages = ["src/tracetally"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"src/tracetally/pricing/data/prices-2026-10.yaml" = "tracetally/pricing/data/prices-2026-10.yaml"
+"src/tracetally/pricing/data/model_prices_and_context_window.json" = "tracetally/pricing/data/model_prices_and_context_window.json"
+"NOTICE" = "tracetally/NOTICE"
 "src/tracetally/py.typed" = "tracetally/py.typed"
 "src/tracetally/report/templates/report.html.j2" = "tracetally/report/templates/report.html.j2"
 "src/tracetally/report/templates/report.md.j2" = "tracetally/report/templates/report.md.j2"
@@ -73,7 +74,6 @@ packages = ["src/tracetally"]
 include = [
   "src",
   "tests",
-  "examples",
   "scripts",
   "README.md",
   "LICENSE",
@@ -83,6 +83,16 @@ include = [
   "SECURITY.md",
   "pyproject.toml",
 ]
+# Data files are not package data. Test inputs are generated at runtime.
+# The bundled LiteLLM snapshot is force-included below.
+exclude = [
+  "**/*.json",
+  "**/*.jsonl",
+  "**/*.csv",
+]
+
+[tool.hatch.build.targets.sdist.force-include]
+"src/tracetally/pricing/data/model_prices_and_context_window.json" = "src/tracetally/pricing/data/model_prices_and_context_window.json"
 
 [tool.ruff]
 target-version = "py310"
@@ -104,6 +114,11 @@ select = ["E", "F", "I", "UP", "B", "SIM", "TID"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["TID251"]
+# The only network code. Ruff flags every urllib.request reference, so the
+# exception is the whole module. scripts/check_no_http_clients.py is stricter:
+# urllib.request is allowed here, and socket, subprocess, and other HTTP
+# clients are still banned.
+"src/tracetally/pricing/fetch.py" = ["TID251"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -141,6 +156,8 @@ source = [
   "tracetally.readers",
   "tracetally.pricing",
   "tracetally.analysis",
+  "tracetally.report",
+  "tracetally.cli",
 ]
 branch = true
 

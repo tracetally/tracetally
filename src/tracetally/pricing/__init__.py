@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Versioned price tables. Prices are data, loaded locally, never fetched."""
+"""List prices. The only network call lives in ``tracetally.pricing.fetch``."""
 
-from tracetally.pricing.table import PriceTable, load_prices
+from tracetally.pricing.table import PriceTable, load_bundled, load_prices
 
-__all__ = ["PriceTable", "load_prices"]
+__all__ = ["PriceTable", "load_bundled", "load_prices"]

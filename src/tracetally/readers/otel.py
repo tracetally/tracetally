@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from tracetally.config import ReaderConfig
+from tracetally.core.cache import cache_accounting
 from tracetally.core.hashing import content_hash, hash_content_parts, retained_content
 from tracetally.core.schema import Capability, LLMCall, Span, SpanKind, Status
 from tracetally.readers.base import BaseReader
@@ -54,6 +55,10 @@ _CACHED_KEYS = (
     "gen_ai.usage.cache_read.input_tokens",
     "gen_ai.usage.cached_tokens",
     "llm.token_count.prompt_details.cache_read",
+)
+_CACHE_WRITE_KEYS = (
+    "gen_ai.usage.cache_creation.input_tokens",
+    "llm.token_count.prompt_details.cache_write",
 )
 _REASONING_KEYS = (
     "gen_ai.usage.reasoning.output_tokens",
@@ -250,18 +255,38 @@ def _span_from_otlp(
     input_tokens = _required_int_attr(attrs, _INPUT_KEYS, field="gen_ai.usage.input_tokens")
     output_tokens = _required_int_attr(attrs, _OUTPUT_KEYS, field="gen_ai.usage.output_tokens")
     cached = _optional_int_attr(attrs, _CACHED_KEYS, field="gen_ai.usage.cache_read.input_tokens")
+    created = _optional_int_attr(
+        attrs, _CACHE_WRITE_KEYS, field="gen_ai.usage.cache_creation.input_tokens"
+    )
     reasoning = _optional_int_attr(
         attrs, _REASONING_KEYS, field="gen_ai.usage.reasoning.output_tokens"
     )
-    if cached is not None and cached > input_tokens:
-        raise ValueError("cached_input_tokens: cached_input_tokens exceeds input_tokens")
+    provider = _first_str(attrs, _PROVIDER_KEYS) or "unknown"
+    accounting = cache_accounting(
+        provider,
+        model,
+        has_cache=cached is not None or created is not None,
+        source="otel",
+    )
 
     parts = _content_parts(attrs)
     digest, prefixes = hash_content_parts(parts)
     content = retained_content(parts) if cfg.include_content else None
-    provider = _first_str(attrs, _PROVIDER_KEYS) or "unknown"
     endpoint = _endpoint(attrs, name, cfg)
     is_batch = parse_bool(attrs.get("tracetally.batch"))
+    service_tier = _first_str(
+        attrs,
+        ("gen_ai.request.service_tier", "llm.service_tier", "tracetally.service_tier"),
+    )
+    base_url = _first_str(
+        attrs,
+        (
+            "gen_ai.request.base_url",
+            "llm.base_url",
+            "server.address",
+            "http.url",
+        ),
+    )
     interactive_raw = attrs.get("tracetally.interactive")
     interactive = parse_bool(interactive_raw) if interactive_raw is not None else None
 
@@ -281,6 +306,8 @@ def _span_from_otlp(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cached_input_tokens=cached,
+        cache_creation_tokens=created,
+        cache_accounting=accounting,
         reasoning_tokens=reasoning,
         request_count=1,
         status=status,
@@ -288,6 +315,9 @@ def _span_from_otlp(
         error_type=error_type,
         attempt=_optional_int_attr(attrs, ("tracetally.attempt",), field="attempt"),
         is_batch=is_batch,
+        service_tier=service_tier.casefold() if service_tier else None,
+        base_url=base_url,
+        tokens_known=True,
         interactive=interactive,
         prefix_hashes=prefixes or None,
         content_hash=digest,

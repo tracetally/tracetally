@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from tests.support.factories import write_langfuse_observations, write_openai_usage_csv
 from tests.support.synthetic import (
     CANARY,
     CONTROL_ENDPOINT,
@@ -27,6 +28,7 @@ from tracetally.config import (
     load_check_params,
     load_tier_map,
 )
+from tracetally.core.cache import cache_accounting
 from tracetally.core.errors import UsageError
 from tracetally.core.schema import Capability, LLMCall, Status
 from tracetally.core.store import TraceStore
@@ -34,7 +36,6 @@ from tracetally.pricing.table import load_bundled
 from tracetally.readers.base import load_paths
 
 runner = CliRunner()
-_FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _TRACE_CHECKS = (
     "token_bloat",
     "cache_opportunity",
@@ -88,7 +89,7 @@ def test_planted_issues_match_and_control_is_clean(tmp_path: Path) -> None:
         assert CANARY not in text
         assert CANARY not in payload
         assert _WHAT_IF in text
-        assert "Offline. No network calls. No telemetry." in text
+        assert "No telemetry." in text
         document = json.loads(payload)
         assert document["analyze_schema_version"] == 1
         assert document["totals"]["est_monthly_savings_usd"]["mid"] == "0.02379"
@@ -96,6 +97,8 @@ def test_planted_issues_match_and_control_is_clean(tmp_path: Path) -> None:
         swap = next(item for item in document["findings"] if item["check"] == "model_swap")
         assert swap["what_if"] is True
         assert _WHAT_IF in swap["recommendation"]
+        bloat = next(item for item in document["findings"] if item["check"] == "token_bloat")
+        assert any("repriced from token counts" in caveat for caveat in bloat["caveats"])
         assert all(
             item["what_if"] is False
             for item in document["findings"]
@@ -133,7 +136,6 @@ def test_checks_skip_when_capabilities_or_tier_map_are_missing() -> None:
         analyze(store, load_bundled(), AnalyzeConfig(skip=frozenset({"not-a-check"})))
 
 
-_EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _CANARIES = (
     "CANARY_PROMPT_DO_NOT_LEAK",
     "CANARY_OUTPUT_DO_NOT_LEAK",
@@ -152,11 +154,11 @@ _MISSING_CAPABILITY = {
 }
 
 
-def test_capability_skips_use_the_langfuse_and_openai_csv_readers() -> None:
+def test_capability_skips_use_the_langfuse_and_openai_csv_readers(tmp_path: Path) -> None:
     """Skips come from the real readers, not a hand-built capability set."""
     table = load_bundled()
-    usage = _FIXTURES / "openai" / "usage.csv"
-    observations = _FIXTURES / "langfuse" / "observations.json"
+    usage = write_openai_usage_csv(tmp_path)
+    observations = write_langfuse_observations(tmp_path)
 
     csv_store = load_paths([usage], ReaderConfig())
     assert csv_store.readers == {"openai_csv"}
@@ -190,23 +192,7 @@ def test_capability_skips_use_the_langfuse_and_openai_csv_readers() -> None:
     assert "an input is cost-only and does not include" in agent.reason
     assert "trace_tree" in agent.reason
 
-    example_csv = analyze(
-        load_paths([_EXAMPLES / "synthetic_openai_usage.csv"], ReaderConfig()),
-        table,
-        AnalyzeConfig(),
-    )
-    cache_reason = next(
-        item.reason for item in example_csv.skipped if item.check == "cache_opportunity"
-    )
-    assert "OpenAI usage CSV is cost-only" in cache_reason
-    example_lang = analyze(
-        load_paths([_EXAMPLES / "synthetic_langfuse.json"], ReaderConfig()),
-        table,
-        AnalyzeConfig(),
-    )
-    assert {item.check for item in example_lang.skipped} == {"model_swap"}
-
-    cli = runner.invoke(app, ["analyze", str(usage), "--json"])
+    cli = runner.invoke(app, ["analyze", str(usage), "--json", "--offline"])
     assert cli.exit_code == 0, cli.output
     payload = json.loads(cli.stdout or cli.output)
     skipped = {item["check"]: item["reason"] for item in payload["skipped_checks"]}
@@ -343,7 +329,7 @@ def test_analyze_command_json_skips_and_exit_codes(tmp_path: Path) -> None:
     write_examples(tmp_path)
     jsonl = tmp_path / "synthetic.jsonl"
     tiers = tmp_path / "tiers.example.yaml"
-    text = runner.invoke(app, ["analyze", str(jsonl), "--tier-map", str(tiers)])
+    text = runner.invoke(app, ["analyze", str(jsonl), "--tier-map", str(tiers), "--offline"])
     assert text.exit_code == 0, text.output
     assert "what-if" in text.output
     assert _WHAT_IF in text.output
@@ -351,18 +337,28 @@ def test_analyze_command_json_skips_and_exit_codes(tmp_path: Path) -> None:
     assert "support.control" not in text.output
 
     machine = runner.invoke(
-        app, ["analyze", str(jsonl), "--tier-map", str(tiers), "--json", "--skip", "token_bloat"]
+        app,
+        [
+            "analyze",
+            str(jsonl),
+            "--tier-map",
+            str(tiers),
+            "--json",
+            "--skip",
+            "token_bloat",
+            "--offline",
+        ],
     )
     assert machine.exit_code == 0, machine.output
     payload = json.loads(machine.stdout or machine.output)
-    assert payload["totals"]["observed_cost_usd"] == "0.27241"
+    assert payload["totals"]["observed_cost_usd"] == "0.29241"
     assert not any(item["check"] == "token_bloat" for item in payload["findings"])
     assert any(
         item["check"] == "token_bloat" and item["reason"] == "skipped with --skip"
         for item in payload["skipped_checks"]
     )
 
-    unknown = runner.invoke(app, ["analyze", str(jsonl), "--only", "nope"])
+    unknown = runner.invoke(app, ["analyze", str(jsonl), "--only", "nope", "--offline"])
     assert unknown.exit_code == EXIT_USAGE
     assert "unknown check" in (unknown.stderr or unknown.output)
 
@@ -371,7 +367,7 @@ def test_analyze_command_json_skips_and_exit_codes(tmp_path: Path) -> None:
         '{"kind":"tool","name":"search","span_id":"s","start_time":"2026-10-01T00:00:00Z"}\n',
         encoding="utf-8",
     )
-    empty = runner.invoke(app, ["analyze", str(spans_only), "--format", "jsonl"])
+    empty = runner.invoke(app, ["analyze", str(spans_only), "--format", "jsonl", "--offline"])
     assert empty.exit_code == EXIT_INPUT
 
     unpriced = tmp_path / "private.jsonl"
@@ -380,7 +376,7 @@ def test_analyze_command_json_skips_and_exit_codes(tmp_path: Path) -> None:
         '"input_tokens":1,"output_tokens":1}\n',
         encoding="utf-8",
     )
-    bare = runner.invoke(app, ["analyze", str(unpriced), "--json"])
+    bare = runner.invoke(app, ["analyze", str(unpriced), "--json", "--offline"])
     assert bare.exit_code == EXIT_UNPRICED
 
     help_text = runner.invoke(app, ["analyze", "--help"])
@@ -460,4 +456,13 @@ def _llm(**overrides: object) -> LLMCall:
         "attrs": {},
     }
     fields.update(overrides)
+    if "cache_accounting" not in fields:
+        cached = fields.get("cached_input_tokens")
+        created = fields.get("cache_creation_tokens")
+        has_cache = cached not in (None, 0) or created not in (None, 0)
+        fields["cache_accounting"] = cache_accounting(
+            str(fields["provider"]),
+            str(fields["model"]),
+            has_cache=bool(has_cache),
+        )
     return LLMCall.model_construct(**fields)  # type: ignore[arg-type]

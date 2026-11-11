@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from tracetally.config import ReaderConfig
+from tracetally.core.cache import ABSENT, INCLUDED
 from tracetally.core.schema import Capability, LLMCall, Span, Status
 from tracetally.readers.base import BaseReader
 from tracetally.readers.csvutil import normalize_key, open_csv, split_header
@@ -179,7 +180,7 @@ class OpenAICsvReader(BaseReader):
         if not model:
             raise ValueError("model: model is required")
         start = self._time(first(row, "start_time"))
-        input_tokens, output_tokens, cached, reasoning = self._tokens(row)
+        input_tokens, output_tokens, cached, reasoning, tokens_known = self._tokens(row)
         reported = parse_decimal(first(row, "cost"), field="reported_cost_usd")
         if input_tokens == 0 and output_tokens == 0 and reported is None and cached is None:
             raise ValueError("input_tokens: row has neither token counts nor a cost")
@@ -187,8 +188,8 @@ class OpenAICsvReader(BaseReader):
         if blank_cost and not self._tokens_blank:
             self._tokens_blank = True
             self.warn(
-                "a cost row had no token counts; tokens were recorded as 0 and "
-                "reported_cost_usd was kept"
+                "a cost row had no token counts; token counts were left unknown "
+                "and were not estimated"
             )
         requests = first(row, "request_count")
         if requests is None:
@@ -226,6 +227,8 @@ class OpenAICsvReader(BaseReader):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_input_tokens=cached,
+            cache_creation_tokens=None,
+            cache_accounting=INCLUDED if cached is not None else ABSENT,
             reasoning_tokens=reasoning,
             request_count=request_count,
             status=Status.OK,
@@ -233,6 +236,9 @@ class OpenAICsvReader(BaseReader):
             error_type=None,
             attempt=None,
             is_batch=batch,
+            service_tier=tier or None,
+            base_url=None,
+            tokens_known=tokens_known,
             interactive=None,
             prefix_hashes=None,
             content_hash=None,
@@ -242,9 +248,11 @@ class OpenAICsvReader(BaseReader):
             attrs=_attrs(row),
         )
 
-    def _tokens(self, row: dict[str, Any]) -> tuple[int, int, int | None, int | None]:
+    def _tokens(self, row: dict[str, Any]) -> tuple[int, int, int | None, int | None, bool]:
         incoming = _optional_token(first(row, "input_tokens"), field="input_tokens")
         outgoing = _optional_token(first(row, "output_tokens"), field="output_tokens")
+        saw_input = incoming is not None
+        saw_output = outgoing is not None
         cached = _optional_token(first(row, "cached_input_tokens"), field="cached_input_tokens")
         uncached = _optional_token(
             first(row, "input_uncached_tokens"),
@@ -253,6 +261,7 @@ class OpenAICsvReader(BaseReader):
         reasoning = _optional_token(first(row, "reasoning_tokens"), field="reasoning_tokens")
         if incoming is None and uncached is not None:
             incoming = uncached + (cached or 0)
+            saw_input = True
             if not self._cache_adjusted:
                 self._cache_adjusted = True
                 self.warn("input_tokens was missing; it was built from uncached plus cached tokens")
@@ -274,7 +283,7 @@ class OpenAICsvReader(BaseReader):
                 "reasoning tokens exceed output tokens; they were kept separate and "
                 "were not added on top of output tokens"
             )
-        return incoming, outgoing, cached, reasoning
+        return incoming, outgoing, cached, reasoning, saw_input and saw_output
 
     def _time(self, value: object) -> datetime:
         loose = (

@@ -7,7 +7,7 @@ Plugins are loaded by importing entry points. Nothing is downloaded.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
 from typing import ClassVar, Protocol
@@ -129,7 +129,17 @@ def read_head(path: Path) -> bytes:
         return handle.read(SNIFF_HEAD_BYTES)
 
 
-def select_reader(path: Path, format_name: str | None) -> type[BaseReader]:
+def select_reader(
+    path: Path,
+    format_name: str | None,
+    *,
+    trust_name: bool = True,
+) -> type[BaseReader]:
+    """Pick a reader. ``trust_name`` false ignores a suffix-only sniff score.
+
+    Directory scan sets ``trust_name`` false so a ``.jsonl`` name cannot make
+    plain text look like usage. Named files keep the default.
+    """
     readers = registry()
     if format_name:
         key = format_name.strip().lower()
@@ -141,8 +151,9 @@ def select_reader(path: Path, format_name: str | None) -> type[BaseReader]:
             )
         return readers[key]
 
+    sniff_path = path if trust_name else Path(path.name).with_suffix("")
     head = read_head(path)
-    scores = {name: float(cls.sniff(path, head)) for name, cls in readers.items()}
+    scores = {name: float(cls.sniff(sniff_path, head)) for name, cls in readers.items()}
     ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     if not ranked or ranked[0][1] < _DETECT_THRESHOLD:
         detail = ", ".join(f"{name}={score:.2f}" for name, score in ranked) or "no readers"
@@ -173,40 +184,75 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def load_paths(paths: list[Path], cfg: ReaderConfig) -> TraceStore:
-    """Stream every path into one store. Capabilities are the intersection."""
+def load_paths(paths: list[Path], cfg: ReaderConfig, *, lenient: bool = False) -> TraceStore:
+    """Stream every path into one store. Capabilities are the intersection.
+
+    ``lenient`` turns a bad file into a warning and keeps reading the rest.
+    ``tracetally run`` uses that. The other commands still fail the run.
+    """
     store = TraceStore()
     if not paths:
         raise ReaderError("no input files")
     for path in paths:
-        if not path.exists():
-            raise ReaderError("file not found", where=str(path))
-        if not path.is_file():
-            raise ReaderError("not a file", where=str(path))
-        reader_cls = select_reader(path, cfg.format_name)
-        reader = reader_cls()
-        stat = InputStat(path=str(path), sha256=file_sha256(path))
-        store.note_capabilities(frozenset(reader_cls.capabilities))
-        store.note_reader(reader_cls.name)
         try:
-            for item in reader.read(path, cfg):
-                if isinstance(item, LLMCall):
-                    store.append_call(item)
-                    stat.records += 1
-                elif isinstance(item, Span):
-                    store.append_span(item)
-                    stat.spans += 1
-                else:
-                    reader.fail(
-                        f"reader yielded {type(item).__name__}",
-                        field=None,
-                        where=str(path),
-                        cfg=cfg,
-                    )
-        finally:
-            reader.finish_warnings()
-        stat.skipped = reader.skipped
-        for warning in reader.warnings:
-            store.warn(f"{reader_cls.name}: {warning}")
-        store.inputs.append(stat)
+            _load_one(store, path, cfg)
+        except ReaderError as exc:
+            if not lenient:
+                raise
+            store.warn(f"file skipped: {exc}")
+        except OSError as exc:
+            if not lenient:
+                raise ReaderError(str(exc), where=str(path)) from exc
+            store.warn(f"file skipped: {path}: {exc}")
     return store
+
+
+def _load_one(
+    store: TraceStore,
+    path: Path,
+    cfg: ReaderConfig,
+    *,
+    accept: Callable[[LLMCall | Span], bool] | None = None,
+) -> tuple[str, int]:
+    """Read one file. ``accept`` false drops the record and counts it.
+
+    Returns the reader name and how many records ``accept`` rejected.
+    """
+    if not path.exists():
+        raise ReaderError("file not found", where=str(path))
+    if not path.is_file():
+        raise ReaderError("not a file", where=str(path))
+    reader_cls = select_reader(path, cfg.format_name)
+    reader = reader_cls()
+    stat = InputStat(path=str(path), sha256=file_sha256(path))
+    store.note_capabilities(frozenset(reader_cls.capabilities))
+    store.note_reader(reader_cls.name)
+    dropped = 0
+    try:
+        for item in reader.read(path, cfg):
+            if isinstance(item, LLMCall):
+                if accept is not None and not accept(item):
+                    dropped += 1
+                    continue
+                store.append_call(item)
+                stat.records += 1
+            elif isinstance(item, Span):
+                if accept is not None and not accept(item):
+                    dropped += 1
+                    continue
+                store.append_span(item)
+                stat.spans += 1
+            else:
+                reader.fail(
+                    f"reader yielded {type(item).__name__}",
+                    field=None,
+                    where=str(path),
+                    cfg=cfg,
+                )
+    finally:
+        reader.finish_warnings()
+    stat.skipped = reader.skipped
+    for warning in reader.warnings:
+        store.warn(f"{reader_cls.name}: {warning}")
+    store.inputs.append(stat)
+    return reader_cls.name, dropped
