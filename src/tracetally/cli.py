@@ -7,7 +7,10 @@ The only network request is a GET of LiteLLM's price file, unless ``--offline``.
 from __future__ import annotations
 
 import json
+import os
 import secrets
+import sys
+import webbrowser
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -23,8 +26,19 @@ from tracetally.config import AnalyzeConfig, ReaderConfig, load_check_params, lo
 from tracetally.core.errors import PriceError, ReaderError, UsageError
 from tracetally.core.money import format_usd
 from tracetally.core.store import TraceStore
+from tracetally.core.terminal import terminal_safe as _terminal_safe
 from tracetally.pricing.table import ModelPrice, PriceTable, load_prices
 from tracetally.readers.base import load_paths, registry, registry_problems
+from tracetally.readers.dedup import dropped_message, load_deduped
+from tracetally.readers.discover import (
+    DEFAULT_MAX_DEPTH,
+    DEFAULT_MAX_FILE_SIZE,
+    FoundRow,
+    format_found_table,
+    format_skipped,
+    scan_directories,
+)
+from tracetally.readers.guide import no_export_text
 
 app = typer.Typer(
     name="tracetally",
@@ -50,14 +64,15 @@ EXIT_INPUT = 3
 EXIT_UNPRICED = 4
 _PRICING_CONFIG_HELP = "tracetally.toml: aliases, prices, discounts, FX."
 _DISCOUNT_HELP = "Fraction off list price (0.1 is 10%). Shows list and effective."
-_RUN_USAGE = "usage: tracetally run [PATH ...] [--offline] [--out DIR] [--pricing-config FILE]"
 
 
 @app.command("run")
 def run_command(
     files: Annotated[
         list[Path] | None,
-        typer.Argument(help="Trace files. JSONL, OTLP JSON, Langfuse export, or OpenAI usage CSV."),
+        typer.Argument(
+            help="Trace files or a directory to scan. With no PATH, scan the current directory.",
+        ),
     ] = None,
     offline: Annotated[
         bool,
@@ -71,28 +86,86 @@ def run_command(
         Path | None,
         typer.Option("--pricing-config", help=_PRICING_CONFIG_HELP),
     ] = None,
+    max_depth: Annotated[
+        int,
+        typer.Option(
+            "--max-depth",
+            min=0,
+            help="Levels below a scan root to read. A file in that folder is depth 1. Default 4.",
+        ),
+    ] = DEFAULT_MAX_DEPTH,
+    max_file_size: Annotated[
+        int,
+        typer.Option(
+            "--max-file-size",
+            min=0,
+            help=(
+                "Skip a scanned file larger than this many bytes. "
+                f"Default {DEFAULT_MAX_FILE_SIZE} (64 MiB)."
+            ),
+        ),
+    ] = DEFAULT_MAX_FILE_SIZE,
+    no_open: Annotated[
+        bool,
+        typer.Option(
+            "--no-open",
+            help="Do not open dashboard.html. Skipped when stdout is not a terminal or CI is set.",
+        ),
+    ] = False,
 ) -> None:
     """Read traces, price them, and write a ranked report. Bad files are warnings."""
-    if not files:
-        typer.echo(
-            "tracetally run needs a trace file. "
-            "Auto-detect with no PATH is not in this release.\n" + _RUN_USAGE,
-            err=True,
-        )
-        raise typer.Exit(code=EXIT_USAGE)
     from tracetally.report.render import ReportOptions, write_run
 
+    roots, explicit = _run_targets(files)
     try:
-        store = load_paths(list(files), ReaderConfig(), lenient=True)
-        for warning in store.warnings:
+        scanned = scan_directories(
+            roots,
+            max_depth=max_depth,
+            max_file_size=max_file_size,
+            out_dir=out,
+        )
+    except UsageError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_USAGE) from exc
+    if not explicit and not scanned.found:
+        typer.echo(no_export_text())
+        raise typer.Exit(code=EXIT_OK)
+
+    try:
+        loaded = load_deduped([*explicit, *[item.path for item in scanned.found]], ReaderConfig())
+    except UsageError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_USAGE) from exc
+    rows = [
+        FoundRow(
+            path=item.label,
+            format_name=item.format_name,
+            records=item.records,
+            size=item.size,
+        )
+        for item in loaded.files
+    ]
+    table_text = format_found_table(rows)
+    if table_text:
+        typer.echo(table_text)
+    skipped_text = format_skipped([*scanned.skipped, *loaded.skipped])
+    if skipped_text:
+        typer.echo(skipped_text)
+    for message in loaded.overlap:
+        typer.echo(f"warning: {_terminal_safe(message)}")
+    if loaded.store.records_dropped:
+        typer.echo(_terminal_safe(dropped_message(loaded.store.records_dropped)))
+
+    try:
+        for warning in loaded.store.warnings:
             if warning.startswith("file skipped:"):
                 typer.echo(f"warning: {_terminal_safe(warning)}", err=True)
         table = load_prices(offline=offline, pricing_config=pricing_config)
         for warning in table.warnings:
             typer.echo(f"warning: {_terminal_safe(warning)}", err=True)
-        result = analyze(store, table)
+        result = analyze(loaded.store, table)
         written = write_run(
-            store,
+            loaded.store,
             result,
             ReportOptions(
                 out=out,
@@ -106,6 +179,8 @@ def run_command(
     except (ReaderError, PriceError) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=EXIT_INPUT) from exc
+    if _dashboard_should_open(no_open=no_open):
+        _open_dashboard(written.dashboard)
     _print_run_summary(written.analysis, out)
 
 
@@ -170,6 +245,7 @@ def summary_command(
         raise typer.Exit(code=EXIT_INPUT) from exc
     rendered = result.to_json() if json_output else result.to_text()
     typer.echo(rendered, nl=not rendered.endswith("\n"))
+    _echo_cta(json_output=json_output)
     if result.calls == 0:
         typer.echo("error: no LLM calls were read", err=True)
         raise typer.Exit(code=EXIT_INPUT)
@@ -254,6 +330,7 @@ def analyze_command(
         raise typer.Exit(code=EXIT_INPUT) from exc
     rendered = result.to_json() if json_output else result.to_text()
     typer.echo(rendered, nl=not rendered.endswith("\n"))
+    _echo_cta(json_output=json_output)
     _exit_if_empty(result)
 
 
@@ -550,25 +627,61 @@ def _emit_report(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=EXIT_INPUT) from exc
     for path in (written.markdown, written.html, written.findings):
-        typer.echo(f"wrote {path}")
+        typer.echo(f"wrote {_terminal_safe(path)}")
     summary_text = written.analysis.summary.to_text()
     findings_text = written.analysis.to_text()
     typer.echo(summary_text, nl=not summary_text.endswith("\n"))
     typer.echo(findings_text, nl=not findings_text.endswith("\n"))
+    _echo_cta(json_output=False)
     _exit_if_empty(written.analysis)
 
 
-def _terminal_safe(value: object) -> str:
-    """Fold ESC, C0, and C1 controls so a name cannot rewrite the terminal."""
-    text = "" if value is None else str(value)
-    safe: list[str] = []
-    for char in text:
-        code = ord(char)
-        if code < 32 or code == 127 or 0x80 <= code <= 0x9F or char in {"\u2028", "\u2029"}:
-            safe.append(" ")
+def _run_targets(files: list[Path] | None) -> tuple[list[Path], list[Path]]:
+    """Directories are scanned. Named files are read as given. No args scans cwd."""
+    if not files:
+        return [Path.cwd()], []
+    roots: list[Path] = []
+    explicit: list[Path] = []
+    for path in files:
+        try:
+            is_directory = path.is_dir()
+        except OSError:
+            explicit.append(path)
+            continue
+        if is_directory:
+            roots.append(path)
         else:
-            safe.append(char)
-    return "".join(safe)
+            explicit.append(path)
+    return roots, explicit
+
+
+def _dashboard_should_open(*, no_open: bool) -> bool:
+    """Open only on an interactive terminal, and never under CI or --no-open."""
+    if no_open or os.environ.get("CI"):
+        return False
+    try:
+        return bool(sys.stdout.isatty())
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
+def _open_dashboard(path: Path) -> None:
+    """Open dashboard.html with a file:// URI. A failure still exits 0."""
+    try:
+        opened = bool(webbrowser.open(path.resolve().as_uri()))
+    except (OSError, ValueError, webbrowser.Error, RuntimeError):
+        opened = False
+    if not opened:
+        typer.echo(f"dashboard: {_terminal_safe(path.resolve())}")
+
+
+def _echo_cta(*, json_output: bool) -> None:
+    """Text summaries end with the CTA. JSON keeps stdout parseable."""
+    line = f"{AUDIT_CTA_TEXT}: {AUDIT_CTA_URL}"
+    if json_output:
+        typer.echo(line, err=True)
+        return
+    typer.echo(line)
 
 
 def _print_run_summary(result: Analysis, out: Path) -> None:

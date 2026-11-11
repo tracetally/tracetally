@@ -9,7 +9,8 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from tests.support.synthetic import write_examples
-from tracetally.cli import EXIT_INPUT, EXIT_UNPRICED, app
+from tracetally._cta import AUDIT_CTA_TEXT, AUDIT_CTA_URL
+from tracetally.cli import EXIT_INPUT, EXIT_OK, EXIT_UNPRICED, app
 
 # GitHub Actions sets GITHUB_ACTIONS, and Typer then forces a color terminal.
 # Rich's option highlighter styles each dash on its own, so "--format" is not
@@ -20,6 +21,60 @@ runner = CliRunner()
 
 def _plain(text: str) -> str:
     return _ANSI.sub("", text)
+
+
+def test_summary_and_analyze_keep_json_stdout_parseable(tmp_path: Path) -> None:
+    write_examples(tmp_path)
+    path = tmp_path / "synthetic.jsonl"
+    summary = runner.invoke(app, ["summary", str(path), "--json", "--offline"])
+    assert summary.exit_code == EXIT_OK, summary.output
+    payload = json.loads(summary.stdout)
+    assert payload["totals"]["calls"] > 0
+    assert AUDIT_CTA_URL not in summary.stdout
+    assert f"{AUDIT_CTA_TEXT}: {AUDIT_CTA_URL}" in (summary.stderr or "")
+
+    text = runner.invoke(app, ["summary", str(path), "--offline"])
+    assert text.exit_code == EXIT_OK, text.output
+    assert text.stdout.rstrip().endswith(f"{AUDIT_CTA_TEXT}: {AUDIT_CTA_URL}")
+
+    analyzed = runner.invoke(app, ["analyze", str(path), "--json", "--offline"])
+    assert analyzed.exit_code == EXIT_OK, analyzed.output
+    parsed = json.loads(analyzed.stdout)
+    assert parsed["findings"]
+    assert AUDIT_CTA_URL not in analyzed.stdout
+    assert f"{AUDIT_CTA_TEXT}: {AUDIT_CTA_URL}" in (analyzed.stderr or "")
+
+
+def test_summary_analyze_and_report_strip_control_names(tmp_path: Path) -> None:
+    source = tmp_path / "calls.jsonl"
+    source.write_text(
+        json.dumps(
+            {
+                "model": "gpt-4o-mini",
+                "provider": "openai",
+                "endpoint": "edge\x1b[2J",
+                "start_time": "2026-10-01T00:00:00Z",
+                "input_tokens": 10,
+                "output_tokens": 1,
+                "http_status": 500,
+                "duration_ms": 20,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    summary = runner.invoke(app, ["summary", str(source), "--offline"])
+    assert summary.exit_code == EXIT_OK, summary.output
+    assert "\x1b" not in summary.stdout
+    assert "gpt-4o-mini" in summary.stdout
+    analyzed = runner.invoke(app, ["analyze", str(source), "--offline"])
+    assert analyzed.exit_code == EXIT_OK, analyzed.output
+    assert "\x1b" not in analyzed.stdout
+    out = tmp_path / "report"
+    reported = runner.invoke(app, ["report", str(source), "--offline", "--out", str(out)])
+    assert reported.exit_code == EXIT_OK, reported.output
+    assert "\x1b" not in reported.stdout
+    assert reported.stdout.rstrip().endswith(f"{AUDIT_CTA_TEXT}: {AUDIT_CTA_URL}")
 
 
 def test_summary_on_jsonl_and_otel(tmp_path: Path) -> None:

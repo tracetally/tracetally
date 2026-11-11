@@ -58,37 +58,10 @@ _SCRIPT = """\
   }
   add(app, "h1", "tracetally");
   var summary = data.summary || {};
-  var totals = data.totals || {};
-  var summaryTotals = summary.totals || {};
-  var calls = totals.calls;
-  if (calls == null) {
-    calls = summaryTotals.calls;
-  }
-  var pricedCalls = totals.priced_calls;
-  if (pricedCalls == null) {
-    pricedCalls = summaryTotals.priced_calls;
-  }
-  var unpricedCalls = totals.unpriced_calls;
-  if (unpricedCalls == null) {
-    unpricedCalls = summaryTotals.unpriced_calls;
-  }
-  var pricedShare = totals.priced_share || summaryTotals.priced_share || "";
-  var cost = totals.observed_cost_usd;
-  if (cost == null) {
-    cost = summaryTotals.cost_usd;
-  }
-  var currency = data.currency || summary.currency || "";
-  var costText = cost == null || cost === "" ? "cost unknown" : cost + " " + currency;
-  add(app, "p", "Total cost " + costText);
-  add(app, "p", "Priced share " + pricedCalls + "/" + calls + " (" + pricedShare + ")");
-  var spendPriced = "0.00%";
-  if (Number(calls || 0) > 0 && Number(unpricedCalls || 0) === 0 && cost != null && cost !== "") {
-    spendPriced = "100.00%";
-  } else if (Number(pricedCalls || 0) > 0 && Number(unpricedCalls || 0) > 0) {
-    spendPriced = "cost unknown";
-  }
-  add(app, "p", "Spend priced " + spendPriced);
-  add(app, "p", "Unpriced calls " + unpricedCalls + " (cost unknown)");
+  var lines = data.summary_lines || [];
+  lines.forEach(function (line) {
+    add(app, "p", line);
+  });
   var meta = document.createElement("p");
   meta.className = "muted";
   meta.textContent = [
@@ -164,6 +137,60 @@ def csp_source_hash(content: str) -> str:
     return base64.b64encode(digest).decode("ascii")
 
 
+def summary_lines(document: dict[str, Any]) -> list[str]:
+    """Dashboard cost lines. Dollars describe priced calls only.
+
+    ``Spend priced`` is ``100.00%`` when every call was priced and the cost is
+    known. It is ``cost unknown`` when nothing was priced, or when some calls
+    were not. The unpriced line is omitted when that count is 0.
+    """
+    totals = _mapping(document.get("totals"))
+    summary = _mapping(document.get("summary"))
+    summary_totals = _mapping(summary.get("totals"))
+    calls = _as_count(totals.get("calls"), summary_totals.get("calls"))
+    priced = _as_count(totals.get("priced_calls"), summary_totals.get("priced_calls"))
+    unpriced = _as_count(totals.get("unpriced_calls"), summary_totals.get("unpriced_calls"))
+    share = totals.get("priced_share")
+    if not share:
+        share = summary_totals.get("priced_share") or ""
+    cost = totals.get("observed_cost_usd")
+    if cost is None:
+        cost = summary_totals.get("cost_usd")
+    currency = str(document.get("currency") or summary.get("currency") or "")
+    if cost is None or cost == "":
+        cost_text = "cost unknown"
+    elif currency:
+        cost_text = f"{cost} {currency}"
+    else:
+        cost_text = str(cost)
+    fully_priced = priced > 0 and unpriced == 0 and cost not in (None, "")
+    spend = "100.00%" if fully_priced else "cost unknown"
+    lines = [
+        f"Total cost (priced calls) {cost_text}",
+        f"Priced share {priced}/{calls} ({share})",
+        f"Spend priced {spend}",
+    ]
+    if unpriced > 0:
+        lines.append(f"Unpriced calls {unpriced} (cost unknown)")
+    return lines
+
+
+def _mapping(value: object) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
+def _as_count(primary: object, fallback: object) -> int:
+    chosen = primary if primary is not None else fallback
+    if isinstance(chosen, bool) or not isinstance(chosen, (int, str)):
+        return 0
+    try:
+        return int(chosen)
+    except ValueError:
+        return 0
+
+
 def render_dashboard(document: dict[str, Any]) -> str:
     """Return one HTML file. The CSP allows the inline script by hash only."""
     lowered = _STYLE.lower()
@@ -174,7 +201,9 @@ def render_dashboard(document: dict[str, Any]) -> str:
         raise ValueError("dashboard script must not close the script element")
     if "innerHTML" in _SCRIPT or "insertAdjacentHTML" in _SCRIPT:
         raise ValueError("dashboard script must build the page with textContent")
-    payload = embed_json(document)
+    payload_doc = dict(document)
+    payload_doc["summary_lines"] = summary_lines(document)
+    payload = embed_json(payload_doc)
     script_hash = csp_source_hash(_SCRIPT)
     style_hash = csp_source_hash(_STYLE)
     policy = (

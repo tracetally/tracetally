@@ -76,6 +76,7 @@ class TraceStore:
     args_hash: list[str | None] = field(default_factory=list)
     spans: list[Span] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    records_dropped: int = 0
     inputs: list[InputStat] = field(default_factory=list)
     capabilities: frozenset[Capability] | None = None
     readers: set[str] = field(default_factory=set)

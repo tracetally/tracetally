@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
+from tests.support.factories import call_record, write_jsonl_records
 from tracetally._cta import AUDIT_CTA_TEXT, AUDIT_CTA_URL
 from tracetally.analysis.engine import cost_label, rank_findings, unknown_cost
-from tracetally.cli import EXIT_OK, EXIT_USAGE, app
+from tracetally.cli import EXIT_OK, app
 from tracetally.core.money import Range
 from tracetally.core.schema import Effort, Finding, Level
+from tracetally.readers.guide import no_export_text
 
 runner = CliRunner()
 
@@ -99,13 +103,18 @@ def test_run_writes_the_report_and_ranks_findings(tmp_path: Path) -> None:
     assert "Book a detailed audit" in (out / "dashboard.html").read_text(encoding="utf-8")
 
 
-def test_run_without_a_path_points_at_the_usage() -> None:
-    result = runner.invoke(app, ["run"])
-    assert result.exit_code == EXIT_USAGE
-    text = result.stderr or result.output
-    assert "needs a trace file" in text
-    assert "tracetally run [PATH ...]" in text
-    assert "Auto-detect" in text
+def test_run_without_a_path_prints_the_export_guide(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / "tracetally-report"
+    result = runner.invoke(app, ["run", "--out", str(out)])
+    assert result.exit_code == EXIT_OK, result.output
+    assert result.stdout == no_export_text() + "\n"
+    assert AUDIT_CTA_URL in result.stdout
+    assert result.stdout.count(AUDIT_CTA_URL) == 1
+    assert "path:  tracetally run ./path" in result.stdout
+    assert not out.exists()
 
 
 def test_run_warns_on_a_bad_file_and_continues(tmp_path: Path) -> None:
@@ -116,8 +125,12 @@ def test_run_warns_on_a_bad_file_and_continues(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     missing = tmp_path / "missing.jsonl"
-    folder = tmp_path / "not-a-file"
-    folder.mkdir()
+    folder = tmp_path / "exports"
+    write_jsonl_records(
+        folder,
+        [call_record(start_time="2026-11-01T00:00:00Z", record_id="folder-call")],
+        name="inside.jsonl",
+    )
     out = tmp_path / "out"
     result = runner.invoke(
         app,
@@ -127,9 +140,9 @@ def test_run_warns_on_a_bad_file_and_continues(tmp_path: Path) -> None:
     warnings = result.stderr or result.output
     assert "file skipped" in warnings
     assert "missing.jsonl" in warnings
-    assert "not a file" in warnings
+    assert "not a file" not in warnings
     payload = json.loads((out / "findings.json").read_text(encoding="utf-8"))
-    assert payload["totals"]["calls"] == 1
+    assert payload["totals"]["calls"] == 2
     assert any("file skipped" in warning for warning in payload["warnings"])
     assert not list(out.glob(".tracetally-*"))
 
@@ -183,6 +196,171 @@ def test_run_strips_terminal_controls_from_names(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_OK, result.output
     assert "\x1b" not in result.output
     assert "\x1b" not in (result.stderr or "")
+
+
+def test_run_directory_is_scanned(tmp_path: Path) -> None:
+    exports = tmp_path / "exports"
+    write_jsonl_records(exports, [call_record()])
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        ["run", str(exports), "--offline", "--out", str(out), "--no-open"],
+    )
+    assert result.exit_code == EXIT_OK, result.output
+    assert "JSONL" in result.stdout
+    assert "calls.jsonl" in result.stdout
+    payload = json.loads((out / "findings.json").read_text(encoding="utf-8"))
+    assert payload["totals"]["calls"] == 1
+    assert payload["records_dropped"] == 0
+    assert (out / "dashboard.html").is_file()
+
+
+def test_run_rejects_a_symlink_root_and_ancestor(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    write_jsonl_records(real / "child", [call_record(record_id="secret-link")], name="secret.jsonl")
+    try:
+        link_root = tmp_path / "link-root"
+        link_root.symlink_to(real / "child", target_is_directory=True)
+        linkparent = tmp_path / "linkparent"
+        linkparent.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available")
+    out = tmp_path / "out"
+    rooted = runner.invoke(
+        app, ["run", str(link_root), "--offline", "--out", str(out), "--no-open"]
+    )
+    assert rooted.exit_code == EXIT_OK, rooted.output
+    assert "No LLM usage file found" in rooted.stdout
+    assert "secret" not in rooted.stdout
+    assert not out.exists()
+    nested = runner.invoke(
+        app,
+        ["run", str(linkparent / "child"), "--offline", "--out", str(out), "--no-open"],
+    )
+    assert nested.exit_code == EXIT_OK, nested.output
+    assert "No LLM usage file found" in nested.stdout
+    assert not out.exists()
+
+
+def test_run_does_not_read_an_explicit_symlink_file(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    write_jsonl_records(
+        real / "nested",
+        [call_record(record_id="through-ancestor")],
+        name="secret.jsonl",
+    )
+    target = write_jsonl_records(
+        real, [call_record(record_id="through-file-link")], name="plain.jsonl"
+    )
+    ordinary = write_jsonl_records(
+        tmp_path, [call_record(record_id="ordinary")], name="ordinary.jsonl"
+    )
+    try:
+        alias = tmp_path / "alias.jsonl"
+        alias.symlink_to(target)
+        linkparent = tmp_path / "linkparent"
+        linkparent.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available")
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(alias),
+            str(linkparent / "nested" / "secret.jsonl"),
+            str(ordinary),
+            "--offline",
+            "--out",
+            str(out),
+            "--no-open",
+        ],
+    )
+    assert result.exit_code == EXIT_OK, result.output
+    assert "alias.jsonl: symlink" in result.stdout
+    assert "linkparent: symlink" in result.stdout
+    payload = json.loads((out / "findings.json").read_text(encoding="utf-8"))
+    assert payload["totals"]["calls"] == 1
+    assert payload["inputs"][0]["records"] == 1
+    joined = " ".join(item["path"] for item in payload["inputs"])
+    assert "ordinary.jsonl" in joined
+    assert "secret.jsonl" not in joined
+    assert "alias.jsonl" not in joined
+    assert "plain.jsonl" not in joined
+
+
+def test_empty_directory_argument_prints_the_guide(tmp_path: Path) -> None:
+    empty = tmp_path / "exports"
+    empty.mkdir()
+    out = tmp_path / "out"
+    result = runner.invoke(app, ["run", str(empty), "--out", str(out)])
+    assert result.exit_code == EXIT_OK, result.output
+    assert result.stdout == no_export_text() + "\n"
+    assert not out.exists()
+
+
+def test_dashboard_opens_with_a_file_uri(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("tracetally.cli._dashboard_should_open", lambda *, no_open: not no_open)
+    opened: list[str] = []
+
+    def fake_open(url: str) -> bool:
+        opened.append(url)
+        return True
+
+    monkeypatch.setattr("webbrowser.open", fake_open)
+    source = write_jsonl_records(tmp_path, [call_record()])
+    out = tmp_path / "my reports" / "ダッシュ"
+    result = runner.invoke(app, ["run", str(source), "--offline", "--out", str(out)])
+    assert result.exit_code == EXIT_OK, result.output
+    expected = (out / "dashboard.html").resolve().as_uri()
+    assert opened == [expected]
+    assert expected.startswith("file:")
+    assert " " not in expected
+    assert "ダッシュ" not in expected or "%" in expected
+
+
+def test_no_open_and_a_failed_open_still_exit_0(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("tracetally.cli._dashboard_should_open", lambda *, no_open: not no_open)
+    source = write_jsonl_records(tmp_path, [call_record()])
+    out = tmp_path / "closed"
+    skipped = runner.invoke(app, ["run", str(source), "--offline", "--out", str(out), "--no-open"])
+    assert skipped.exit_code == EXIT_OK, skipped.output
+    assert (out / "dashboard.html").is_file()
+
+    def refuse(_url: str) -> bool:
+        return False
+
+    monkeypatch.setattr("webbrowser.open", refuse)
+    again = tmp_path / "again"
+    failed = runner.invoke(app, ["run", str(source), "--offline", "--out", str(again)])
+    assert failed.exit_code == EXIT_OK, failed.output
+    dashboard = again / "dashboard.html"
+    assert f"dashboard: {dashboard.resolve()}" in failed.stdout
+
+    def explode(_url: str) -> bool:
+        raise OSError("no display")
+
+    monkeypatch.setattr("webbrowser.open", explode)
+    third = tmp_path / "third"
+    raised = runner.invoke(app, ["run", str(source), "--offline", "--out", str(third)])
+    assert raised.exit_code == EXIT_OK, raised.output
+    assert f"dashboard: {(third / 'dashboard.html').resolve()}" in raised.stdout
+
+
+def test_open_is_skipped_without_a_tty_or_under_ci(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tracetally.cli import _dashboard_should_open
+
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    assert _dashboard_should_open(no_open=False) is True
+    assert _dashboard_should_open(no_open=True) is False
+    monkeypatch.setenv("CI", "true")
+    assert _dashboard_should_open(no_open=False) is False
+    monkeypatch.delenv("CI")
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    assert _dashboard_should_open(no_open=False) is False
 
 
 def _prices(directory: Path) -> Path:

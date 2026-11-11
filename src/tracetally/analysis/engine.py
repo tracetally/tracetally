@@ -23,6 +23,7 @@ from tracetally.core.errors import UsageError
 from tracetally.core.money import format_usd
 from tracetally.core.schema import Capability, Finding, Level, SkippedCheck
 from tracetally.core.store import TraceStore
+from tracetally.core.terminal import terminal_safe
 from tracetally.pricing.table import PriceTable
 
 ANALYZE_SCHEMA_VERSION = 1
@@ -124,7 +125,7 @@ class Analysis:
         console.print(
             f"calls {summary.calls}  priced {summary.priced_calls}/{summary.calls} "
             f"({summary.priced_share})  "
-            f"observed cost {format_usd(summary.cost_usd)} {summary.currency}  "
+            f"observed cost {format_usd(summary.cost_usd)} {terminal_safe(summary.currency)}  "
             f"monthly factor {_money(self.monthly_factor)}"
         )
         window = f"{_iso(summary.time_start) or '-'} to {_iso(summary.time_end) or '-'}"
@@ -162,12 +163,12 @@ class Analysis:
         if self.skipped:
             console.print("Skipped checks")
             for skipped in self.skipped:
-                console.print(f"- {skipped.check}: {skipped.reason}")
+                console.print(f"- {terminal_safe(skipped.check)}: {terminal_safe(skipped.reason)}")
             console.print()
         if self.summary.warnings:
             console.print("Warnings")
             for warning in self.summary.warnings:
-                console.print(f"- {warning}")
+                console.print(f"- {terminal_safe(warning)}")
             console.print()
         console.print(self.summary.methodology)
         console.print(ANALYZE_METHODOLOGY)
@@ -316,7 +317,7 @@ def _findings_table(title: str, findings: list[Finding]) -> Table:
         endpoint = item.evidence[0].endpoint if item.evidence else ""
         table.add_row(
             item.check,
-            endpoint or "",
+            terminal_safe(endpoint or ""),
             format_usd(item.est_monthly_usd.low),
             format_usd(item.est_monthly_usd.mid),
             format_usd(item.est_monthly_usd.high),
@@ -330,14 +331,14 @@ def _findings_table(title: str, findings: list[Finding]) -> Table:
 
 def _print_finding(console: Console, item: Finding) -> None:
     label = " what-if" if item.what_if else ""
-    console.print(f"{item.id}{label}")
-    console.print(f"  {item.title}")
-    console.print(f"  {item.recommendation}")
+    console.print(f"{terminal_safe(item.id)}{label}")
+    console.print(f"  {terminal_safe(item.title)}")
+    console.print(f"  {terminal_safe(item.recommendation)}")
     for row in item.evidence:
         if row.detail:
-            console.print(f"  evidence: {row.detail}")
+            console.print(f"  evidence: {terminal_safe(row.detail)}")
     for caveat in item.caveats:
-        console.print(f"  caveat: {caveat}")
+        console.print(f"  caveat: {terminal_safe(caveat)}")
     console.print()
 
 

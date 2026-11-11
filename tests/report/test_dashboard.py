@@ -11,7 +11,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from tracetally.cli import app
-from tracetally.report.dashboard import csp_source_hash, embed_json
+from tracetally.report.dashboard import csp_source_hash, embed_json, summary_lines
 
 runner = CliRunner()
 _PAYLOAD = "</script><img src=x onerror=alert(1)>&"
@@ -123,3 +123,66 @@ def test_dashboard_shows_cost_priced_share_and_unpriced(tmp_path: Path) -> None:
     assert "cost unknown" in html
     assert "0.15" in html
     assert "50.00%" in html
+    lines = _summary_lines(html)
+    assert lines[0].startswith("Total cost (priced calls) ")
+    assert any(line.startswith("Unpriced calls 1") for line in lines)
+    assert "Spend priced 0.00%" not in lines
+    assert "Spend priced cost unknown" in lines
+
+
+def test_dashboard_hides_unpriced_when_every_call_is_priced(tmp_path: Path) -> None:
+    path = tmp_path / "priced.jsonl"
+    path.write_text(
+        '{"model":"gpt-4o-mini","provider":"openai","start_time":"2026-10-01T00:00:00Z",'
+        '"input_tokens":1000,"output_tokens":1}\n',
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    result = runner.invoke(app, ["run", str(path), "--offline", "--out", str(out), "--no-open"])
+    assert result.exit_code == 0, result.output
+    lines = _summary_lines((out / "dashboard.html").read_text(encoding="utf-8"))
+    assert lines[0].startswith("Total cost (priced calls) ")
+    assert "cost unknown" not in lines[0]
+    assert "Spend priced 100.00%" in lines
+    assert all(not line.startswith("Unpriced calls") for line in lines)
+    assert "Unpriced calls" not in (out / "dashboard.html").read_text(encoding="utf-8")
+
+
+def test_dashboard_says_cost_unknown_when_nothing_is_priced(tmp_path: Path) -> None:
+    path = tmp_path / "unknown.jsonl"
+    path.write_text(
+        '{"model":"no-such-model","provider":"openai","start_time":"2026-10-01T00:00:00Z",'
+        '"input_tokens":10,"output_tokens":1}\n',
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    result = runner.invoke(app, ["run", str(path), "--offline", "--out", str(out), "--no-open"])
+    assert result.exit_code == 0, result.output
+    lines = _summary_lines((out / "dashboard.html").read_text(encoding="utf-8"))
+    assert lines[0] == "Total cost (priced calls) cost unknown"
+    assert "Spend priced cost unknown" in lines
+    assert "Spend priced 0.00%" not in lines
+    direct = summary_lines(
+        {
+            "currency": "USD",
+            "totals": {
+                "calls": 2,
+                "priced_calls": 0,
+                "unpriced_calls": 2,
+                "priced_share": "0.00%",
+                "observed_cost_usd": None,
+            },
+        }
+    )
+    assert direct[0] == "Total cost (priced calls) cost unknown"
+    assert "Spend priced cost unknown" in direct
+    assert any(line.startswith("Unpriced calls 2") for line in direct)
+
+
+def _summary_lines(html: str) -> list[str]:
+    match = re.search(r'id="tracetally-data">(.*?)</script>', html, flags=re.DOTALL)
+    assert match is not None
+    payload = json.loads(match.group(1))
+    lines = payload["summary_lines"]
+    assert isinstance(lines, list)
+    return lines

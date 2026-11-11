@@ -30,7 +30,9 @@ tracetally run usage.csv --pricing-config ./tracetally.toml
 
 It prices only the models that appear in your export, using LiteLLM's MIT-licensed price JSON (one price-list download, 24-hour cache, bundled snapshot fallback). `--offline` skips the fetch and uses the bundled snapshot. `--out` changes the report directory (default `./tracetally-report/`). `--pricing-config` points at a `tracetally.toml` of aliases, custom prices, discounts, and a static FX rate.
 
-Rule-based findings, ranked by estimated dollars saved, are written to `./tracetally-report/` as `findings.json`, `report.md`, and `dashboard.html`. A local static dashboard opens. There is no database. The dashboard is one file: inline CSS, one inline script, no remote assets.
+`tracetally run` with no PATH scans the current directory. `tracetally run ./exports` scans that folder. The scan opens `.jsonl`, `.json`, `.csv`, and `.ndjson`, sniffs the format from the first records, and does not follow symlinks. It skips `.git`, `.venv`, `venv`, `node_modules`, `__pycache__`, `dist`, `build`, `.tox`, `.mypy_cache`, `site-packages`, and the report folder. `--max-depth` defaults to 4 (a file in the folder you named is depth 1). `--max-file-size` defaults to 67108864 bytes (64 MiB); a larger file is skipped with a note. Identical file contents are counted once. A record whose request, span, or trace id was already seen in an earlier file is dropped, and that count is stored as `records_dropped` in `findings.json`. Files that share a model and a time window but no ids are kept, with an overlap warning.
+
+Rule-based findings, ranked by estimated dollars saved, are written to `./tracetally-report/` as `findings.json`, `report.md`, and `dashboard.html`. The dashboard is written in that folder and opens in the local browser. `--no-open` leaves it closed. It also stays closed when stdout is not a terminal or when `CI` is set. There is no database. The dashboard is one file: inline CSS, one inline script, no remote assets.
 
 Runs locally. Your data never leaves your machine. The only network request tracetally makes is a price-list download, which `--offline` turns off. No telemetry, no proxy, no LLM calls.
 
@@ -38,7 +40,7 @@ If no usage file is found, the command prints `No LLM usage file found`, a short
 
 A bad file prints a warning and the rest of the files still run. Exit 0 when the report is written.
 
-`summary` and `analyze` stay as terminal-only commands. They are not aliases of `run`. `report` still writes `report.md`, `report.html`, and `findings.json`. `run` is the command that writes the dashboard and opens it.
+`summary` and `analyze` stay as terminal-only commands. They are not aliases of `run`. `report` still writes `report.md`, `report.html`, and `findings.json`. `run` writes the dashboard and opens it unless you pass `--no-open`.
 
 ## What it is not
 

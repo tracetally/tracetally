@@ -2,6 +2,13 @@
 
 ## 0.1.0.dev0
 
+`tracetally run` with no PATH scans the current directory. `tracetally run DIR`
+scans that directory. Identical files are counted once. Records that repeat a
+request, span, or trace id are dropped, and that count is `records_dropped` in
+`findings.json`. An empty scan prints an export guide and exits 0. The
+dashboard opens in the local browser unless `--no-open` is set, stdout is not
+a terminal, or `CI` is set.
+
 `tracetally run` reads the files you name, prices them, and writes
 `findings.json`, `report.md`, and `dashboard.html`. Findings are ranked by
 estimated dollars saved. Unknown cost sorts last. `summary` and `analyze`
