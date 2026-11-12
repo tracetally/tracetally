@@ -2,14 +2,6 @@
 
 Your LLM bill tells you the total. tracetally tells you why.
 
-tracetally is a local CLI. Point it at LLM usage exports you already have. It prices the calls, ranks where the spend went, and writes a report on disk. It looks for token bloat, cache opportunities, batch candidates, retry waste, agent loops, and model-swap what-ifs, plus latency tails and 429/5xx rates when the export has those fields.
-
-## Privacy
-
-It runs on your machine. It is not a proxy, gateway, router, middleware, SDK, or server. It does not sit on the request path, hold provider API keys, send telemetry, or call an LLM.
-
-The only network request is one HTTPS GET of LiteLLM's price file, `model_prices_and_context_window.json`. `--offline` skips that download and uses the bundled snapshot. A cache younger than 24 hours is reused; a failed fetch falls back to a stale cache, then the snapshot.
-
 ## Install
 
 Python 3.10 or newer. Apache-2.0.
@@ -18,23 +10,15 @@ Python 3.10 or newer. Apache-2.0.
 pip install tracetally
 ```
 
-This tree is `0.1.0.dev0` until the release commit. A checkout uses `python -m pip install -e ".[dev]"`.
-
 ## Quickstart
 
 ```bash
 tracetally run
 ```
 
-With no path, `run` scans the current directory. Pass files or a directory to scan that path instead.
+With no path, `run` scans the current directory and sniffs each file's format. It writes `findings.json`, `report.md`, and `dashboard.html` in `tracetally-report/`, and opens the dashboard in your browser. `--offline` uses the bundled price snapshot and opens no socket.
 
-```bash
-tracetally run ./exports
-tracetally run traces.jsonl --offline --out ./tracetally-report
-tracetally run usage.csv --pricing-config ./tracetally.toml --no-open
-```
-
-`run` accepts:
+Pass your own files or a directory to scan that path instead. `run` accepts:
 
 | Flag | What it does |
 |---|---|
@@ -48,6 +32,12 @@ tracetally run usage.csv --pricing-config ./tracetally.toml --no-open
 The scan opens `.jsonl`, `.json`, `.csv`, and `.ndjson`. It sniffs the format and does not follow symlinks. It skips `.git`, `.venv`, `venv`, `node_modules`, `__pycache__`, `dist`, `build`, `.tox`, `.mypy_cache`, `site-packages`, and the report folder. Identical file contents are counted once. A repeated request, span, or trace id is dropped; that count is `records_dropped` in `findings.json`.
 
 If nothing is found, `run` prints `No LLM usage file found`, a short export guide, and exits 0. A bad file is a warning; the other files still run. Exit 0 when the report folder is written. Exit 2 is a usage error. Exit 3 is an input or price-file error.
+
+## Privacy
+
+Runs locally. Your data never leaves your machine. The only network request tracetally makes is a price-list download, which `--offline` turns off. No telemetry, no proxy, no LLM calls.
+
+That download is one HTTPS GET of LiteLLM's price file, `model_prices_and_context_window.json`. `--offline` reads the bundled snapshot and does not open a socket. Otherwise a cache younger than 24 hours is reused; a failed fetch falls back to a stale cache, then the snapshot. tracetally is not a gateway, router, middleware, SDK, or server, and it does not hold provider API keys.
 
 ## Inputs
 
@@ -113,6 +103,8 @@ Unknown models and self-hosted names are **cost unknown**, not $0. There is no l
 For a written plan on exports you share, see [Book a detailed audit](https://tracetally.github.io/tracetally/audit/). Console text, `report.md`, and the dashboard footer use that same link. The page is `docs/audit/index.html`.
 
 ## Contributing
+
+This tree is `0.1.0.dev0` until the release commit. A checkout uses `python -m pip install -e ".[dev]"`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Local checks:
 
