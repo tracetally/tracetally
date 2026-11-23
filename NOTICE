@@ -19,7 +19,7 @@ Third-party notices
 The bundled model price snapshot
 ``src/tracetally/pricing/data/model_prices_and_context_window.json``
 is a copy of LiteLLM's ``model_prices_and_context_window.json``, retrieved
-2026-11-10 from
+2026-11-23 from
 https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
 (project https://github.com/BerriAI/litellm). That file is MIT-licensed.
 The license text below is included so it ships in the sdist and the wheel.

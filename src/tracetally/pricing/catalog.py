@@ -14,7 +14,7 @@ from importlib.resources import files
 from tracetally.core.errors import PriceError
 
 BUNDLED_NAME = "model_prices_and_context_window.json"
-BUNDLED_SNAPSHOT_DATE = date(2026, 11, 10)
+BUNDLED_SNAPSHOT_DATE = date(2026, 11, 23)
 _MILLION = Decimal(1_000_000)
 _SKIP_KEYS = frozenset({"sample_spec"})
 _ABOVE = re.compile(r"above_(\d+)k_tokens")
